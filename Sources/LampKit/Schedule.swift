@@ -7,6 +7,10 @@ public enum LampAction: Codable, Hashable, Sendable {
     /// Warm white percentage (0 = coolest, 100 = warmest).
     case colorTemperature(warm: Int)
     case color(r: Int, g: Int, b: Int)
+    /// Built-in animation number (see `DMX03Effects`).
+    case effect(Int)
+    /// Effect speed 0–100.
+    case speed(Int)
 
     public var label: String {
         switch self {
@@ -15,6 +19,8 @@ public enum LampAction: Codable, Hashable, Sendable {
         case .brightness(let b): "Brightness \(b)%"
         case .colorTemperature(let w): "White \(w)% warm"
         case .color(let r, let g, let b): String(format: "Color #%02X%02X%02X", r, g, b)
+        case .effect(let n): "Effect: " + (DMX03Effects.all.first { $0.number == n }?.name ?? "#\(n)")
+        case .speed(let v): "Speed \(v)%"
         }
     }
 }

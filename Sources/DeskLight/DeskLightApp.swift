@@ -7,6 +7,8 @@ struct DeskLightApp: App {
     @State private var lamp: LampController
     @State private var scheduler: Scheduler
     @State private var wallpaper: WallpaperSync
+    @State private var automations: Automations
+    private let commands: Commands
 
     init() {
         let args = CommandLine.arguments
@@ -18,14 +20,17 @@ struct DeskLightApp: App {
         let lamp = LampController()
         _lamp = State(initialValue: lamp)
         _scheduler = State(initialValue: Scheduler(lamp: lamp))
-        _wallpaper = State(initialValue: WallpaperSync(lamp: lamp))
+        let wallpaper = WallpaperSync(lamp: lamp)
+        _wallpaper = State(initialValue: wallpaper)
+        _automations = State(initialValue: Automations(lamp: lamp))
+        commands = Commands(lamp: lamp, wallpaper: wallpaper)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            ControlPanel(lamp: lamp, wallpaper: wallpaper)
+            ControlPanel(lamp: lamp, wallpaper: wallpaper, automations: automations)
         } label: {
-            Image(systemName: lamp.isConnected ? "lightbulb.fill" : "lightbulb")
+            Image(systemName: automations.onAir ? "video.fill" : lamp.isConnected ? "lightbulb.fill" : "lightbulb")
         }
         .menuBarExtraStyle(.window)
 
@@ -39,6 +44,9 @@ struct DeskLightApp: App {
 struct ControlPanel: View {
     let lamp: LampController
     @Bindable var wallpaper: WallpaperSync
+    @Bindable var automations: Automations
+    @AppStorage("effect") private var effect = 255
+    @AppStorage("speed") private var speed = 50.0
     @Environment(\.openWindow) private var openWindow
     @AppStorage("brightness") private var brightness = 80.0
     @AppStorage("warmth") private var warmth = 50.0
@@ -110,6 +118,15 @@ struct ControlPanel: View {
                 if let error = wallpaper.error {
                     Text(error).font(.caption).foregroundStyle(.secondary)
                 }
+                HStack {
+                    EffectPicker(selection: $effect)
+                        .onChange(of: effect) { lamp.setEffect($1) }
+                    Button("Play") { lamp.setEffect(effect) }
+                }
+                LabeledContent("Speed") {
+                    Slider(value: $speed, in: 0...100)
+                        .onChange(of: speed) { lamp.setSpeed(Int($1)) }
+                }
             } else {
                 Button(lamp.status == .scanning ? "Scanning…" : "Scan for lamps") { lamp.startScan() }
                     .disabled(lamp.status == .scanning)
@@ -126,6 +143,14 @@ struct ControlPanel: View {
             }
 
             Divider()
+            Toggle("Off when Mac locks or sleeps", isOn: $automations.followLock)
+            HStack {
+                Text("On-Air red light:")
+                Toggle("Camera", isOn: $automations.onAirCamera)
+                Toggle("Mic", isOn: $automations.onAirMic)
+            }
+            Text("Shortcuts: ⌃⌥⌘L toggle · ⌃⌥⌘↑/↓ brightness · ⌃⌥⌘W wallpaper")
+                .font(.caption).foregroundStyle(.secondary)
             DisclosureGroup("Log") {
                 ScrollView {
                     Text(lamp.log.suffix(30).joined(separator: "\n"))

@@ -23,6 +23,35 @@ Menu bar → **Wallpaper color** sends the most vivid dominant color of your des
 Turn on **Follow** to update the lamp whenever the wallpaper or active Space changes.
 Static images only (JPEG/PNG/HEIC/WebP); dynamic and aerial wallpapers aren't readable.
 
+## Effects
+
+The popup lists the lamp's 210 built-in animations (from the LED LAMP app's `dmx03_model` table) with a speed slider.
+Schedules can start an effect too.
+
+## Automations
+
+- **Off when Mac locks or sleeps**: lamp turns off on lock/sleep and back on at unlock (only if it was on).
+- **On-Air light**: lamp turns red while the camera (and optionally the microphone) is in use by any app,
+  then restores the previous color. No camera/mic permission needed; it only reads whether the device is busy.
+
+## Keyboard shortcuts
+
+| Keys | Action |
+|---|---|
+| ⌃⌥⌘L | Toggle on/off |
+| ⌃⌥⌘↑ / ↓ | Brightness ±10% |
+| ⌃⌥⌘W | Wallpaper color |
+
+## Links (Shortcuts, Raycast, Terminal)
+
+```sh
+open desklight://on              # off, toggle, wallpaper
+open desklight://color/FF8800
+open desklight://white/70        # 70% warm
+open desklight://brightness/40   # or +10 / -10
+open desklight://effect/12       # speed/80
+```
+
 ## Schedules
 
 Menu bar → **Schedules…**. Each schedule has a time, days, and actions (power, white/color, brightness).

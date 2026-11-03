@@ -58,7 +58,7 @@ final class WallpaperSync {
     }
 
     private func poll() {
-        guard following, let url = currentURL(), signature(url) != lastSignature else { return }
+        guard following, !lamp.lookIsHeld, let url = currentURL(), signature(url) != lastSignature else { return }
         apply()
     }
 

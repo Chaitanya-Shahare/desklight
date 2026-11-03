@@ -33,6 +33,12 @@ final class LampController: NSObject {
 
     var isConnected: Bool { characteristic != nil }
 
+    /// What the app last told the lamp to do; used to restore after On-Air / unlock.
+    private(set) var isOn = true
+    private(set) var look: LampAction?
+    /// While set (e.g. On-Air), ambient features like wallpaper sync must not change the colour.
+    var lookIsHeld = false
+
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var characteristic: CBCharacteristic?
@@ -104,8 +110,9 @@ final class LampController: NSObject {
     func setBrightness(_ v: Int) { perform([.brightness(v)]) }
     func setWarmth(_ warm: Int) { perform([.colorTemperature(warm: warm)]) }
     func setColor(r: Int, g: Int, b: Int) { perform([.color(r: r, g: g, b: b)]) }
-    func setEffect(_ mode: Int) { send(LampProtocol.effect(mode, variant: variant)) }
-    func setSpeed(_ v: Int) { send(LampProtocol.speed(v, variant: variant)) }
+    func setEffect(_ mode: Int) { perform([.effect(mode)]) }
+    func setSpeed(_ v: Int) { perform([.speed(v)]) }
+    func toggle() { setPower(!isOn) }
 
     // MARK: Internals
 
@@ -115,17 +122,26 @@ final class LampController: NSObject {
     private func frame(for action: LampAction) -> [UInt8] {
         switch action {
         case .on:
+            isOn = true
             return LampProtocol.power(true, variant: variant)
         case .off:
+            isOn = false
             return LampProtocol.power(false, variant: variant)
         case .brightness(let b):
             return LampProtocol.brightness(b, variant: variant, channel: lastChannel)
         case .colorTemperature(let w):
             lastChannel = .colorTemperature
+            look = action
             return LampProtocol.colorTemperature(warm: w, variant: variant)
         case .color(let r, let g, let b):
             lastChannel = .rgb
+            look = action
             return LampProtocol.color(r: r, g: g, b: b, variant: variant)
+        case .effect(let n):
+            look = action
+            return LampProtocol.effect(n, variant: variant)
+        case .speed(let v):
+            return LampProtocol.speed(v, variant: variant)
         }
     }
 
@@ -166,15 +182,27 @@ final class LampController: NSObject {
         }
     }
 
+    private static let logFile = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/DeskLight.log")
+
     private func append(_ line: String) {
         log.append(line)
         if log.count > 200 { log.removeFirst(log.count - 200) }
+        let stamped = "\(Date().formatted(.iso8601)) \(line)\n"
+        if let h = try? FileHandle(forWritingTo: Self.logFile) {
+            h.seekToEndOfFile()
+            h.write(Data(stamped.utf8))
+            try? h.close()
+        } else {
+            try? stamped.write(to: Self.logFile, atomically: true, encoding: .utf8)
+        }
     }
 
     private func didBecomeReady(_ p: CBPeripheral, _ c: CBCharacteristic) {
         characteristic = c
         variant = .init(deviceName: p.name ?? "")
         status = .connected(p.name ?? "lamp")
+        append("Connected to \(p.name ?? "lamp") (\(variant))")
         if c.properties.contains(.notify) { p.setNotifyValue(true, for: c) }
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
