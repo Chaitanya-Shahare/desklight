@@ -77,3 +77,52 @@ struct DominantColorTests {
         #expect(c.b == 255 && c.r < 60 && c.g < 120)
     }
 }
+
+struct NewFeatureTests {
+    private func image(_ w: Int, _ h: Int, _ pixel: (Int, Int) -> (UInt8, UInt8, UInt8)) throws -> CGImage {
+        var px = [UInt8](repeating: 255, count: w * h * 4)
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                (px[i], px[i + 1], px[i + 2]) = pixel(x, y)
+            }
+        }
+        let ctx = try #require(CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        return try #require(ctx.makeImage())
+    }
+
+    /// Dusk wallpaper shape: 80% dark navy sky, 20% bright coral horizon → coral wins.
+    @Test func brightHorizonBeatsDarkSky() throws {
+        let img = try image(50, 50) { _, y in y < 40 ? (15, 40, 90) : (240, 110, 90) }
+        let c = try #require(DominantColor.of(img))
+        #expect(c.r == 255 && c.b < 120)
+    }
+
+    @Test func hexRoundTrip() {
+        #expect(RGB(hex: "#FF653E") == RGB(r: 255, g: 101, b: 62))
+        #expect(RGB(r: 1, g: 2, b: 255).hex == "0102FF")
+        #expect(RGB(hex: "nope") == nil)
+    }
+
+    @Test func musicBeatJumpsHueAndBrightens() {
+        var m = MusicReactor(hue: 0)
+        for _ in 0..<100 { _ = m.update(bass: 0.02, rms: 0.03, dt: 0.02) }   // quiet bed
+        let quiet = m.level
+        let (_, beat) = m.update(bass: 0.3, rms: 0.3, dt: 0.02)              // kick
+        #expect(beat)
+        #expect(m.level == 1 && quiet < 0.5)
+        #expect(m.hue > 0.08)
+    }
+
+    @Test func oldSchedulesWithEffectsStillLoad() throws {
+        let json = """
+        [{"id":"\(UUID().uuidString)","enabled":true,"hour":7,"minute":30,"weekdays":[],
+          "actions":[{"on":{}},{"effect":{"_0":3}},{"brightness":{"_0":50}}]}]
+        """
+        let entries = try JSONDecoder().decode([ScheduleEntry].self, from: Data(json.utf8))
+        #expect(entries.first?.actions == [.on, .brightness(50)])
+        #expect(entries.first?.fadeMinutes == 0)
+    }
+}

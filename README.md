@@ -1,7 +1,7 @@
 # DeskLight
 
 Menu bar app for Bluetooth desk lamps that use the **LED LAMP** app (iOS id1449109039 / Android `com.ledlamp`).
-Power, brightness, warm/cool white, RGB, wallpaper-matched color, and time-based schedules.
+Power, brightness, a color wheel / RGB picker, warm/cool white, live color from your wallpaper, screen, or music, slow fades, and schedules.
 
 Tested with `LEDDMX-03-0F2B` (RGB). Also speaks the `LEDBLE-*` command set from the same app.
 
@@ -17,16 +17,28 @@ open build/DeskLight.app        # or: scripts/build-app.sh --install
 2. Close the LED LAMP app on your phone (the lamp accepts one connection at a time).
 3. Click the 💡 in the menu bar → **Scan for lamps** → pick your lamp.
 
-## Wallpaper color
+## Color
 
-Menu bar → **Wallpaper color** sends the most vivid dominant color of your desktop picture.
-Turn on **Follow** to update the lamp whenever the wallpaper or active Space changes.
-Static images only (JPEG/PNG/HEIC/WebP); dynamic and aerial wallpapers aren't readable.
+**Color** tab: drag on the wheel, use the R/G/B sliders, type a hex code, or click a swatch.
+**White** tab: cool ↔ warm slider (mixed from RGB on RGB-only lamps).
 
-## Effects
+## Live
 
-The popup lists the lamp's 210 built-in animations (from the LED LAMP app's `dmx03_model` table) with a speed slider.
-Schedules can start an effect too.
+**Live** tab picks what drives the color:
+
+| Mode | What it does | Permission |
+|---|---|---|
+| Wallpaper | Brightest vivid color of your desktop picture; updates when it or the Space changes | none |
+| Screen | Follows what's on the main display ~12×/s (videos, games); dark scenes dim the lamp | Screen & System Audio Recording |
+| Music | Brightness follows bass, hue steps on each beat; sensitivity slider | Screen & System Audio Recording |
+
+Picking a color manually turns Live off.
+
+## Fades
+
+- **Fade out**: dims to off over 5–60 minutes.
+- **Sunrise**: from off, rises to warm white at 100% over 5–30 minutes.
+- Schedules have a **Transition** setting to fade to their target instead of switching instantly.
 
 ## Automations
 
@@ -49,7 +61,8 @@ open desklight://on              # off, toggle, wallpaper
 open desklight://color/FF8800
 open desklight://white/70        # 70% warm
 open desklight://brightness/40   # or +10 / -10
-open desklight://effect/12       # speed/80
+open desklight://live/music      # screen, wallpaper, off
+open desklight://fadeout/30      # minutes; also sunrise/15
 ```
 
 ## Schedules

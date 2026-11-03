@@ -7,6 +7,7 @@ struct DeskLightApp: App {
     @State private var lamp: LampController
     @State private var scheduler: Scheduler
     @State private var wallpaper: WallpaperSync
+    @State private var live: LiveSync
     @State private var automations: Automations
     private let commands: Commands
 
@@ -18,19 +19,21 @@ struct DeskLightApp: App {
             exit(2)
         }
         let lamp = LampController()
+        let wallpaper = WallpaperSync(lamp: lamp)
+        let live = LiveSync(lamp: lamp, wallpaper: wallpaper)
         _lamp = State(initialValue: lamp)
         _scheduler = State(initialValue: Scheduler(lamp: lamp))
-        let wallpaper = WallpaperSync(lamp: lamp)
         _wallpaper = State(initialValue: wallpaper)
+        _live = State(initialValue: live)
         _automations = State(initialValue: Automations(lamp: lamp))
-        commands = Commands(lamp: lamp, wallpaper: wallpaper)
+        commands = Commands(lamp: lamp, wallpaper: wallpaper, live: live)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            ControlPanel(lamp: lamp, wallpaper: wallpaper, automations: automations)
+            ControlPanel(lamp: lamp, wallpaper: wallpaper, live: live, automations: automations)
         } label: {
-            Image(systemName: automations.onAir ? "video.fill" : lamp.isConnected ? "lightbulb.fill" : "lightbulb")
+            Image(systemName: menuIcon)
         }
         .menuBarExtraStyle(.window)
 
@@ -39,118 +42,62 @@ struct DeskLightApp: App {
         }
         .defaultSize(width: 520, height: 420)
     }
+
+    private var menuIcon: String {
+        if automations.onAir { return "video.fill" }
+        if !lamp.isConnected { return "lightbulb" }
+        switch live.mode {
+        case .screen: return "tv.fill"
+        case .music: return "music.note"
+        default: return lamp.isFading ? "sunset.fill" : "lightbulb.fill"
+        }
+    }
 }
 
 struct ControlPanel: View {
+    enum Tab: String, CaseIterable { case color = "Color", white = "White", live = "Live" }
+
     let lamp: LampController
-    @Bindable var wallpaper: WallpaperSync
+    let wallpaper: WallpaperSync
+    @Bindable var live: LiveSync
     @Bindable var automations: Automations
-    @AppStorage("effect") private var effect = 255
-    @AppStorage("speed") private var speed = 50.0
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("tab") private var tab = Tab.color
     @AppStorage("brightness") private var brightness = 80.0
     @AppStorage("warmth") private var warmth = 50.0
-    @AppStorage("hue") private var hue = 0.08
-    @AppStorage("saturation") private var saturation = 1.0
-
-    private static let swatches: [(Int, Int, Int)] = [
-        (255, 0, 0), (255, 110, 0), (255, 220, 0), (0, 255, 0), (0, 255, 255),
-        (0, 0, 255), (150, 0, 255), (255, 0, 150), (255, 255, 255),
-    ]
+    @AppStorage("customColor") private var customHex = "FF653E"
+    @State private var hexField = ""
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+
+    private static let swatches: [RGB] = [
+        RGB(r: 255, g: 0, b: 0), RGB(r: 255, g: 110, b: 0), RGB(r: 255, g: 220, b: 0), RGB(r: 0, g: 255, b: 0),
+        RGB(r: 0, g: 255, b: 255), RGB(r: 0, g: 0, b: 255), RGB(r: 150, g: 0, b: 255), RGB(r: 255, g: 0, b: 150),
+        RGB(r: 255, g: 255, b: 255),
+    ]
+
+    private var custom: RGB { RGB(hex: customHex) ?? RGB(r: 255, g: 101, b: 62) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(lamp.status.label).font(.headline)
-                Spacer()
-                if lamp.isConnected {
-                    Button("Disconnect") { lamp.disconnect() }
-                }
-            }
-
+            header
             if lamp.isConnected {
-                HStack {
-                    Button { lamp.setPower(true) } label: { Label("On", systemImage: "power") }
-                    Button { lamp.setPower(false) } label: { Label("Off", systemImage: "poweroff") }
-                }
                 LabeledContent("Brightness") {
                     Slider(value: $brightness, in: 0...100)
                         .onChange(of: brightness) { lamp.setBrightness(Int($1)) }
                 }
-                LabeledContent("Cool ↔ Warm") {
-                    Slider(value: $warmth, in: 0...100)
-                        .onChange(of: warmth) { lamp.setWarmth(Int($1)) }
+                Picker("", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) } }
+                    .pickerStyle(.segmented).labelsHidden()
+                switch tab {
+                case .color: colorTab
+                case .white: whiteTab
+                case .live: liveTab
                 }
-                // Inline controls: the system colour panel would close this menu bar popover.
-                HStack(spacing: 6) {
-                    ForEach(Self.swatches.indices, id: \.self) { i in
-                        let (r, g, b) = Self.swatches[i]
-                        Button { lamp.setColor(r: r, g: g, b: b) } label: {
-                            Circle()
-                                .fill(Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255))
-                                .overlay(Circle().stroke(.secondary.opacity(0.5)))
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                LabeledContent("Hue") {
-                    Slider(value: $hue, in: 0...1)
-                        .tint(Color(hue: hue, saturation: 1, brightness: 1))
-                        .onChange(of: hue) { sendHue() }
-                }
-                LabeledContent("Saturation") {
-                    Slider(value: $saturation, in: 0...1)
-                        .onChange(of: saturation) { sendHue() }
-                }
-                HStack {
-                    Button { wallpaper.apply(force: true) } label: { Label("Wallpaper color", systemImage: "photo") }
-                    if let c = wallpaper.color {
-                        Circle()
-                            .fill(Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255))
-                            .frame(width: 16, height: 16)
-                    }
-                    Spacer()
-                    Toggle("Follow", isOn: $wallpaper.following)
-                        .help("Update the lamp whenever the wallpaper or Space changes")
-                }
-                if let error = wallpaper.error {
-                    Text(error).font(.caption).foregroundStyle(.secondary)
-                }
-                HStack {
-                    EffectPicker(selection: $effect)
-                        .onChange(of: effect) { lamp.setEffect($1) }
-                    Button("Play") { lamp.setEffect(effect) }
-                }
-                LabeledContent("Speed") {
-                    Slider(value: $speed, in: 0...100)
-                        .onChange(of: speed) { lamp.setSpeed(Int($1)) }
-                }
+                fadeRow
             } else {
-                Button(lamp.status == .scanning ? "Scanning…" : "Scan for lamps") { lamp.startScan() }
-                    .disabled(lamp.status == .scanning)
-                ForEach(lamp.discovered.sorted { $0.rssi > $1.rssi }) { d in
-                    Button { lamp.connect(d) } label: {
-                        HStack { Text(d.name); Spacer(); Text("\(d.rssi) dBm").foregroundStyle(.secondary) }
-                    }
-                    .buttonStyle(.plain)
-                }
-                if lamp.status == .unauthorized {
-                    Text("Allow DeskLight in System Settings → Privacy & Security → Bluetooth.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                scanList
             }
-
             Divider()
-            Toggle("Off when Mac locks or sleeps", isOn: $automations.followLock)
-            HStack {
-                Text("On-Air red light:")
-                Toggle("Camera", isOn: $automations.onAirCamera)
-                Toggle("Mic", isOn: $automations.onAirMic)
-            }
-            Text("Shortcuts: ⌃⌥⌘L toggle · ⌃⌥⌘↑/↓ brightness · ⌃⌥⌘W wallpaper")
-                .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("Settings") { settings }
             DisclosureGroup("Log") {
                 ScrollView {
                     Text(lamp.log.suffix(30).joined(separator: "\n"))
@@ -165,20 +112,191 @@ struct ControlPanel: View {
                     openWindow(id: "schedules")
                     NSApp.activate(ignoringOtherApps: true)
                 }
-                Toggle("Launch at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, on in
-                        try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
-                    }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
             }
         }
         .padding()
-        .frame(width: 320)
+        .frame(width: 340)
+        .onAppear { hexField = custom.hex }
     }
 
-    private func sendHue() {
-        let c = NSColor(hue: hue, saturation: saturation, brightness: 1, alpha: 1)
-        lamp.setColor(r: Int(c.redComponent * 255), g: Int(c.greenComponent * 255), b: Int(c.blueComponent * 255))
+    // MARK: Sections
+
+    private var header: some View {
+        HStack {
+            Text(lamp.status.label).font(.headline).lineLimit(1)
+            Spacer()
+            if lamp.isConnected {
+                Toggle("", isOn: Binding(get: { lamp.isOn }, set: { lamp.setPower($0) }))
+                    .toggleStyle(.switch).labelsHidden()
+            }
+        }
+    }
+
+    private var colorTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 14) {
+                ColorWheel(color: custom) { pick($0) }
+                    .frame(width: 130, height: 130)
+                VStack(alignment: .leading, spacing: 6) {
+                    channel("R", \.r, .red)
+                    channel("G", \.g, .green)
+                    channel("B", \.b, .blue)
+                    HStack {
+                        Text("#").foregroundStyle(.secondary)
+                        TextField("RRGGBB", text: $hexField)
+                            .font(.body.monospaced())
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { if let c = RGB(hex: hexField) { pick(c) } }
+                    }
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach(Self.swatches, id: \.self) { c in
+                    Button { pick(c) } label: { dot(c, size: 22) }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var whiteTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("Cool ↔ Warm") {
+                Slider(value: $warmth, in: 0...100)
+                    .onChange(of: warmth) { _, w in
+                        live.stopForManualChange()
+                        lamp.setWarmth(Int(w))
+                    }
+            }
+            HStack {
+                ForEach([("Cool", 0.0), ("Neutral", 45.0), ("Warm", 80.0), ("Candle", 100.0)], id: \.0) { name, w in
+                    Button(name) { warmth = w }
+                }
+            }
+        }
+    }
+
+    private var liveTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("", selection: $live.mode) { ForEach(LiveSync.Mode.allCases) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).labelsHidden()
+            switch live.mode {
+            case .off:
+                Text("Wallpaper, what's on screen, or music can drive the lamp color.")
+                    .font(.caption).foregroundStyle(.secondary)
+            case .wallpaper:
+                HStack {
+                    Text("Follows your desktop picture.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let c = wallpaper.color { dot(c, size: 16) }
+                    Button("Apply now") { wallpaper.apply(force: true) }
+                }
+                if let e = wallpaper.error { Text(e).font(.caption).foregroundStyle(.secondary) }
+            case .screen, .music:
+                HStack {
+                    Text(live.mode == .screen ? "Matches what's on your main display." : "Pulses with system audio.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let c = live.current { dot(c, size: 16) }
+                }
+                if live.mode == .music {
+                    LabeledContent("Sensitivity") { Slider(value: $live.sensitivity, in: 0.3...3) }
+                }
+            }
+            if let e = live.error { Text(e).font(.caption).foregroundStyle(.orange) }
+        }
+    }
+
+    private var fadeRow: some View {
+        HStack {
+            if let end = lamp.fadeEndsAt {
+                Image(systemName: "sunset")
+                Text("Fading until \(end.formatted(date: .omitted, time: .shortened))").font(.caption)
+                Spacer()
+                Button("Cancel") { lamp.cancelFade() }
+            } else {
+                Menu("Fade out") {
+                    ForEach([5, 15, 30, 60], id: \.self) { m in
+                        Button("\(m) minutes") { startFade([.off], minutes: m) }
+                    }
+                }
+                Menu("Sunrise") {
+                    ForEach([5, 15, 30], id: \.self) { m in
+                        Button("\(m) minutes") { startFade([.on, .colorTemperature(warm: 60), .brightness(100)], minutes: m) }
+                    }
+                }
+            }
+        }
+    }
+
+    private var scanList: some View {
+        VStack(alignment: .leading) {
+            Button(lamp.status == .scanning ? "Scanning…" : "Scan for lamps") { lamp.startScan() }
+                .disabled(lamp.status == .scanning)
+            ForEach(lamp.discovered.sorted { $0.rssi > $1.rssi }) { d in
+                Button { lamp.connect(d) } label: {
+                    HStack { Text(d.name); Spacer(); Text("\(d.rssi) dBm").foregroundStyle(.secondary) }
+                }
+                .buttonStyle(.plain)
+            }
+            if lamp.status == .unauthorized {
+                Text("Allow DeskLight in System Settings → Privacy & Security → Bluetooth.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var settings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Off when Mac locks or sleeps", isOn: $automations.followLock)
+            HStack {
+                Text("On-Air red light:")
+                Toggle("Camera", isOn: $automations.onAirCamera)
+                Toggle("Mic", isOn: $automations.onAirMic)
+            }
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, on in
+                    try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
+                }
+            Text("⌃⌥⌘L toggle · ⌃⌥⌘↑/↓ brightness · ⌃⌥⌘W wallpaper")
+                .font(.caption).foregroundStyle(.secondary)
+            if lamp.isConnected {
+                Button("Disconnect") { lamp.disconnect() }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: Helpers
+
+    private func channel(_ label: String, _ key: WritableKeyPath<RGB, Int>, _ tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(label).font(.caption.monospaced()).frame(width: 12)
+            Slider(value: Binding(get: { Double(custom[keyPath: key]) },
+                                  set: { var c = custom; c[keyPath: key] = Int($0); pick(c) }),
+                   in: 0...255)
+                .tint(tint)
+            Text("\(custom[keyPath: key])").font(.caption.monospacedDigit()).frame(width: 26, alignment: .trailing)
+        }
+    }
+
+    private func dot(_ c: RGB, size: CGFloat) -> some View {
+        Circle()
+            .fill(Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255))
+            .overlay(Circle().stroke(.secondary.opacity(0.5)))
+            .frame(width: size, height: size)
+    }
+
+    private func pick(_ c: RGB) {
+        customHex = c.hex
+        hexField = c.hex
+        live.stopForManualChange()
+        lamp.setColor(r: c.r, g: c.g, b: c.b)
+    }
+
+    private func startFade(_ target: [LampAction], minutes: Int) {
+        live.stopForManualChange()
+        lamp.fade(to: target, over: Double(minutes) * 60)
     }
 }

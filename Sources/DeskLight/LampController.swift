@@ -35,6 +35,7 @@ final class LampController: NSObject {
 
     /// What the app last told the lamp to do; used to restore after On-Air / unlock.
     private(set) var isOn = true
+    private(set) var brightnessLevel = Int(UserDefaults.standard.object(forKey: "brightness") as? Double ?? 80)
     private(set) var look: LampAction?
     /// While set (e.g. On-Air), ambient features like wallpaper sync must not change the colour.
     var lookIsHeld = false
@@ -90,14 +91,109 @@ final class LampController: NSObject {
         disconnect()
     }
 
-    /// Runs actions now, connecting first if needed (used by schedules).
+    /// Runs actions now, connecting first if needed. Cancels any running fade.
     func perform(_ actions: [LampAction]) {
+        cancelFade()
+        apply(actions)
+    }
+
+    private func apply(_ actions: [LampAction]) {
         guard isConnected else {
-            pendingAfterConnect += actions
+            pendingAfterConnect = Array((pendingAfterConnect + actions).suffix(20))
             reconnect()
             return
         }
-        for action in actions { send(frame(for: action)) }
+        for action in actions {
+            send(frame(for: action))
+            // A fade to off leaves brightness at 0; bring it back when switched on again.
+            if action == .on, let b = brightnessToRestore {
+                brightnessToRestore = nil
+                send(frame(for: .brightness(b)))
+            }
+        }
+    }
+
+    /// Live colour from screen/music sync. Dropped (not queued) when it can't be shown.
+    func stream(_ c: RGB) {
+        guard isConnected, isOn, !isFading, !lookIsHeld else { return }
+        send(LampProtocol.color(r: c.r, g: c.g, b: c.b, variant: variant))
+    }
+
+    // MARK: Fades
+
+    private(set) var fadeEndsAt: Date?
+    private var fadeTask: Task<Void, Never>?
+    private var brightnessToRestore: Int?
+    var isFading: Bool { fadeTask != nil }
+
+    func cancelFade() {
+        fadeTask?.cancel()
+        fadeTask = nil
+        fadeEndsAt = nil
+    }
+
+    /// Gradually moves colour and brightness to `target` over `seconds`.
+    /// `.on` in the target starts from darkness (sunrise); `.off` ends by switching off.
+    func fade(to target: [LampAction], over seconds: TimeInterval) {
+        cancelFade()
+        var fromRGB = currentRGB
+        var toRGB = fromRGB
+        var fromB = brightnessLevel, toB = brightnessLevel
+        var endOff = false
+        for action in target {
+            switch action {
+            case .color(let r, let g, let b): toRGB = RGB(r: r, g: g, b: b)
+            case .colorTemperature(let w): toRGB = Self.rgb(forWarmth: w)
+            case .brightness(let b): toB = b
+            case .off: endOff = true; toB = 0
+            case .on:
+                if !isOn {
+                    fromB = 0
+                    brightnessToRestore = nil
+                    apply([.brightness(0), .on])
+                }
+            }
+        }
+        if !isOn && !target.contains(.on) { fromRGB = toRGB }
+        let restore = brightnessLevel > 0 ? brightnessLevel : 80
+        let steps = max(1, min(Int(seconds), 240))
+        let interval = seconds / Double(steps)
+        fadeEndsAt = Date().addingTimeInterval(seconds)
+        append("Fade over \(Int(seconds))s → \(target.map(\.label).joined(separator: ", "))")
+        fadeTask = Task { [weak self] in
+            for i in 1...steps {
+                try? await Task.sleep(for: .seconds(interval))
+                guard let self, !Task.isCancelled else { return }
+                let t = Double(i) / Double(steps)
+                let b = Int((Double(fromB) + Double(toB - fromB) * t).rounded())
+                var step: [LampAction] = [.brightness(b)]
+                if fromRGB != toRGB {
+                    let c = fromRGB.mixed(with: toRGB, t)
+                    step.insert(.color(r: c.r, g: c.g, b: c.b), at: 0)
+                }
+                self.apply(step)
+            }
+            guard let self, !Task.isCancelled else { return }
+            if endOff {
+                self.apply([.off])
+                self.brightnessToRestore = restore
+            }
+            self.fadeTask = nil
+            self.fadeEndsAt = nil
+        }
+    }
+
+    private var currentRGB: RGB {
+        switch look {
+        case .color(let r, let g, let b): RGB(r: r, g: g, b: b)
+        case .colorTemperature(let w): Self.rgb(forWarmth: w)
+        default: RGB(r: 255, g: 255, b: 255)
+        }
+    }
+
+    private static func rgb(forWarmth w: Int) -> RGB {
+        let (r, g, b) = LampProtocol.rgbWhite(warm: w)
+        return RGB(r: r, g: g, b: b)
     }
 
     func reconnect() {
@@ -110,8 +206,6 @@ final class LampController: NSObject {
     func setBrightness(_ v: Int) { perform([.brightness(v)]) }
     func setWarmth(_ warm: Int) { perform([.colorTemperature(warm: warm)]) }
     func setColor(r: Int, g: Int, b: Int) { perform([.color(r: r, g: g, b: b)]) }
-    func setEffect(_ mode: Int) { perform([.effect(mode)]) }
-    func setSpeed(_ v: Int) { perform([.speed(v)]) }
     func toggle() { setPower(!isOn) }
 
     // MARK: Internals
@@ -128,6 +222,7 @@ final class LampController: NSObject {
             isOn = false
             return LampProtocol.power(false, variant: variant)
         case .brightness(let b):
+            brightnessLevel = b
             return LampProtocol.brightness(b, variant: variant, channel: lastChannel)
         case .colorTemperature(let w):
             lastChannel = .colorTemperature
@@ -137,11 +232,6 @@ final class LampController: NSObject {
             lastChannel = .rgb
             look = action
             return LampProtocol.color(r: r, g: g, b: b, variant: variant)
-        case .effect(let n):
-            look = action
-            return LampProtocol.effect(n, variant: variant)
-        case .speed(let v):
-            return LampProtocol.speed(v, variant: variant)
         }
     }
 

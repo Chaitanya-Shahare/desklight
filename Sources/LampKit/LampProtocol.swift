@@ -70,7 +70,7 @@ public enum LampProtocol {
     }
 
     /// Approximate white for RGB-only lamps: blend cool (255,255,255) toward warm (255,147,41).
-    static func rgbWhite(warm: Int) -> (Int, Int, Int) {
+    public static func rgbWhite(warm: Int) -> (Int, Int, Int) {
         let t = Double(max(0, min(100, warm))) / 100
         return (255, Int(255 - t * 108), Int(255 - t * 214))
     }

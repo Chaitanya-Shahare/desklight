@@ -7,10 +7,6 @@ public enum LampAction: Codable, Hashable, Sendable {
     /// Warm white percentage (0 = coolest, 100 = warmest).
     case colorTemperature(warm: Int)
     case color(r: Int, g: Int, b: Int)
-    /// Built-in animation number (see `DMX03Effects`).
-    case effect(Int)
-    /// Effect speed 0–100.
-    case speed(Int)
 
     public var label: String {
         switch self {
@@ -19,8 +15,6 @@ public enum LampAction: Codable, Hashable, Sendable {
         case .brightness(let b): "Brightness \(b)%"
         case .colorTemperature(let w): "White \(w)% warm"
         case .color(let r, let g, let b): String(format: "Color #%02X%02X%02X", r, g, b)
-        case .effect(let n): "Effect: " + (DMX03Effects.all.first { $0.number == n }?.name ?? "#\(n)")
-        case .speed(let v): "Speed \(v)%"
         }
     }
 }
@@ -34,12 +28,32 @@ public struct ScheduleEntry: Codable, Hashable, Identifiable, Sendable {
     public var weekdays: Set<Int>
     /// Actions run in order (e.g. on → white 70% warm → brightness 40%).
     public var actions: [LampAction]
+    /// 0 = instant; otherwise colour/brightness glide to the target over this many minutes.
+    public var fadeMinutes: Int
 
-    public init(hour: Int, minute: Int, weekdays: Set<Int> = [], actions: [LampAction]) {
+    public init(hour: Int, minute: Int, weekdays: Set<Int> = [], actions: [LampAction], fadeMinutes: Int = 0) {
         self.hour = hour
         self.minute = minute
         self.weekdays = weekdays
         self.actions = actions
+        self.fadeMinutes = fadeMinutes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        hour = try c.decode(Int.self, forKey: .hour)
+        minute = try c.decode(Int.self, forKey: .minute)
+        weekdays = try c.decode(Set<Int>.self, forKey: .weekdays)
+        // Schedules saved by older builds may contain removed actions (effects); skip those.
+        actions = try c.decode([FailableAction].self, forKey: .actions).compactMap(\.action)
+        fadeMinutes = try c.decodeIfPresent(Int.self, forKey: .fadeMinutes) ?? 0
+    }
+
+    private struct FailableAction: Decodable {
+        let action: LampAction?
+        init(from decoder: Decoder) throws { action = try? LampAction(from: decoder) }
     }
 
     public func matches(_ date: Date, calendar: Calendar = .current) -> Bool {
@@ -50,6 +64,8 @@ public struct ScheduleEntry: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var timeLabel: String { String(format: "%02d:%02d", hour, minute) }
+
+    public var fadeLabel: String? { fadeMinutes > 0 ? "fade \(fadeMinutes) min" : nil }
 
     public var daysLabel: String {
         if weekdays.isEmpty || weekdays.count == 7 { return "Every day" }

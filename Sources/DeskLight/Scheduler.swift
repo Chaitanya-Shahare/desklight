@@ -38,21 +38,25 @@ final class Scheduler {
     }
 
     func tick(now: Date = Date()) {
-        for entry in clock.due(entries, at: now) {
+        for entry in clock.due(entries, at: now) { run(entry) }
+    }
+
+    func run(_ entry: ScheduleEntry) {
+        if entry.fadeMinutes > 0 {
+            lamp.fade(to: entry.actions, over: Double(entry.fadeMinutes) * 60)
+        } else {
             lamp.perform(entry.actions)
         }
     }
-
-    func run(_ entry: ScheduleEntry) { lamp.perform(entry.actions) }
 
     private func load() {
         guard let data = try? Data(contentsOf: fileURL),
               let saved = try? JSONDecoder().decode([ScheduleEntry].self, from: data) else {
             entries = [
                 ScheduleEntry(hour: 9, minute: 0, weekdays: [2, 3, 4, 5, 6],
-                              actions: [.on, .colorTemperature(warm: 30), .brightness(80)]),
-                ScheduleEntry(hour: 19, minute: 0, actions: [.colorTemperature(warm: 90), .brightness(40)]),
-                ScheduleEntry(hour: 23, minute: 30, actions: [.off]),
+                              actions: [.on, .colorTemperature(warm: 30), .brightness(80)], fadeMinutes: 15),
+                ScheduleEntry(hour: 19, minute: 0, actions: [.colorTemperature(warm: 90), .brightness(40)], fadeMinutes: 30),
+                ScheduleEntry(hour: 23, minute: 30, actions: [.off], fadeMinutes: 20),
             ].map { var e = $0; e.enabled = false; return e }
             return
         }

@@ -13,7 +13,8 @@ struct ScheduleList: View {
                         Toggle("", isOn: $entry.enabled).labelsHidden()
                         VStack(alignment: .leading) {
                             Text(entry.timeLabel).font(.title3.monospacedDigit())
-                            Text(entry.daysLabel).font(.caption).foregroundStyle(.secondary)
+                            Text([entry.daysLabel, entry.fadeLabel].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         .frame(width: 110, alignment: .leading)
                         Text(entry.actions.map(\.label).joined(separator: " → "))
@@ -50,7 +51,7 @@ struct ScheduleList: View {
 
 struct ScheduleEditor: View {
     enum Power: String, CaseIterable { case unchanged = "Unchanged", on = "On", off = "Off" }
-    enum Light: String, CaseIterable { case unchanged = "Unchanged", white = "White", color = "Color", effect = "Effect" }
+    enum Light: String, CaseIterable { case unchanged = "Unchanged", white = "White", color = "Color" }
 
     let original: ScheduleEntry
     let onSave: (ScheduleEntry) -> Void
@@ -62,16 +63,16 @@ struct ScheduleEditor: View {
     @State private var light: Light = .unchanged
     @State private var warmth = 50.0
     @State private var color = Color.orange
-    @State private var effect = 255
-    @State private var speed = 50.0
     @State private var setBrightness = false
     @State private var brightness = 80.0
+    @State private var fadeMinutes = 0
 
     init(entry: ScheduleEntry, onSave: @escaping (ScheduleEntry) -> Void) {
         original = entry
         self.onSave = onSave
         _time = State(initialValue: Calendar.current.date(from: DateComponents(hour: entry.hour, minute: entry.minute)) ?? Date())
         _weekdays = State(initialValue: entry.weekdays)
+        _fadeMinutes = State(initialValue: entry.fadeMinutes)
         for action in entry.actions {
             switch action {
             case .on: _power = State(initialValue: .on)
@@ -85,11 +86,6 @@ struct ScheduleEditor: View {
             case .color(let r, let g, let b):
                 _light = State(initialValue: .color)
                 _color = State(initialValue: Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255))
-            case .effect(let n):
-                _light = State(initialValue: .effect)
-                _effect = State(initialValue: n)
-            case .speed(let v):
-                _speed = State(initialValue: Double(v))
             }
         }
     }
@@ -118,14 +114,14 @@ struct ScheduleEditor: View {
                 if light == .color {
                     ColorPicker("Color", selection: $color, supportsOpacity: false)
                 }
-                if light == .effect {
-                    EffectPicker(selection: $effect)
-                    LabeledContent("Speed \(Int(speed))%") { Slider(value: $speed, in: 0...100) }
-                }
                 Toggle("Set brightness", isOn: $setBrightness)
                 if setBrightness {
                     LabeledContent("Brightness \(Int(brightness))%") { Slider(value: $brightness, in: 0...100) }
                 }
+            }
+            Picker("Transition", selection: $fadeMinutes) {
+                Text("Instant").tag(0)
+                ForEach([5, 10, 15, 20, 30, 45, 60], id: \.self) { Text("Fade over \($0) min").tag($0) }
             }
         }
         .formStyle(.grouped)
@@ -156,8 +152,6 @@ struct ScheduleEditor: View {
                 let n = NSColor(color).usingColorSpace(.sRGB) ?? .white
                 actions.append(.color(r: Int(n.redComponent * 255), g: Int(n.greenComponent * 255),
                                       b: Int(n.blueComponent * 255)))
-            case .effect:
-                actions += [.effect(effect), .speed(Int(speed))]
             case .unchanged: break
             }
             if setBrightness { actions.append(.brightness(Int(brightness))) }
@@ -168,18 +162,8 @@ struct ScheduleEditor: View {
         entry.minute = c.minute ?? 0
         entry.weekdays = weekdays
         entry.actions = actions
+        entry.fadeMinutes = fadeMinutes
         return entry
     }
 }
 
-struct EffectPicker: View {
-    @Binding var selection: Int
-
-    var body: some View {
-        Picker("Effect", selection: $selection) {
-            ForEach(DMX03Effects.all, id: \.number) { e in
-                Text(e.number == 255 ? e.name : "\(e.number). \(e.name)").tag(e.number)
-            }
-        }
-    }
-}

@@ -7,17 +7,20 @@ import LampKit
 ///     desklight://on | off | toggle | wallpaper
 ///     desklight://brightness/40      desklight://brightness/+10
 ///     desklight://color/FF8800       desklight://white/70   (70% warm)
-///     desklight://effect/12          desklight://speed/80
+///     desklight://live/screen|music|wallpaper|off
+///     desklight://fadeout/30         desklight://sunrise/15  (minutes)
 @MainActor
 final class Commands: NSObject {
     private let lamp: LampController
     private let wallpaper: WallpaperSync
+    private let live: LiveSync
     private var hotKeys: [EventHotKeyRef?] = []
     private static var shared: Commands?
 
-    init(lamp: LampController, wallpaper: WallpaperSync) {
+    init(lamp: LampController, wallpaper: WallpaperSync, live: LiveSync) {
         self.lamp = lamp
         self.wallpaper = wallpaper
+        self.live = live
         super.init()
         Self.shared = self
         installURLHandler()
@@ -51,13 +54,22 @@ final class Commands: NSObject {
         case "toggle": lamp.toggle()
         case "wallpaper": wallpaper.apply(force: true)
         case "brightness": setBrightness(arg)
-        case "white": if let w = Int(arg) { lamp.setWarmth(w) }
-        case "effect": if let n = Int(arg) { lamp.setEffect(n) }
-        case "speed": if let v = Int(arg) { lamp.setSpeed(v) }
+        case "white":
+            guard let w = Int(arg) else { return }
+            live.stopForManualChange()
+            lamp.setWarmth(w)
         case "color":
-            let hex = arg.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-            guard hex.count == 6, let v = Int(hex, radix: 16) else { return }
-            lamp.setColor(r: v >> 16 & 0xFF, g: v >> 8 & 0xFF, b: v & 0xFF)
+            guard let c = RGB(hex: arg) else { return }
+            live.stopForManualChange()
+            lamp.setColor(r: c.r, g: c.g, b: c.b)
+        case "live":
+            if let m = LiveSync.Mode.allCases.first(where: { $0.rawValue.lowercased() == arg }) { live.mode = m }
+        case "fadeout":
+            live.stopForManualChange()
+            lamp.fade(to: [.off], over: (Double(arg) ?? 30) * 60)
+        case "sunrise":
+            live.stopForManualChange()
+            lamp.fade(to: [.on, .colorTemperature(warm: 60), .brightness(100)], over: (Double(arg) ?? 15) * 60)
         default: break
         }
     }
