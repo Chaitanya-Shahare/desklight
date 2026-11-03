@@ -37,7 +37,6 @@ final class LiveSync {
     private let output = CaptureOutput()
     private var reactor = MusicReactor(hue: .random(in: 0...1))
     private var smoothed: RGB?
-    private var lastSent = Date.distantPast
 
     init(lamp: LampController, wallpaper: WallpaperSync) {
         self.lamp = lamp
@@ -116,24 +115,23 @@ final class LiveSync {
         guard mode == .screen else { return }
         // Dark scenes dim the lamp; bright scenes run it at full colour.
         let target = a.color.scaled(0.12 + a.luminance * 1.6)
-        let next = smoothed.map { $0.mixed(with: target, 0.35) } ?? target
+        // Light pre-smoothing removes frame-to-frame flicker; the lamp's glide does the rest.
+        let next = smoothed.map { $0.mixed(with: target, 0.5) } ?? target
         smoothed = next
-        send(next, minChange: 6, minInterval: 0.08)
+        send(next, tau: 0.25, minChange: 3)
     }
 
     private func audioBuffer(bass: Double, rms: Double, dt: Double) {
         guard mode == .music else { return }
         let (color, beat) = reactor.update(bass: bass, rms: rms, dt: dt)
-        send(color, minChange: beat ? 0 : 4, minInterval: beat ? 0 : 0.06)
+        // Snappy attack on beats, softer decay between them.
+        send(color, tau: beat ? 0.04 : 0.12, minChange: beat ? 0 : 2)
     }
 
-    private func send(_ c: RGB, minChange: Int, minInterval: TimeInterval) {
-        let now = Date()
+    private func send(_ c: RGB, tau: Double, minChange: Int) {
         if let current, c.distance(to: current) < minChange { return }
-        guard now.timeIntervalSince(lastSent) >= minInterval else { return }
-        lastSent = now
         current = c
-        lamp.stream(c)
+        lamp.stream(c, tau: tau)
     }
 }
 

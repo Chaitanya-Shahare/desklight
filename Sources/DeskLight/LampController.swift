@@ -104,6 +104,12 @@ final class LampController: NSObject {
             return
         }
         for action in actions {
+            if let c = rgbOnlyColor(for: action) {
+                look = action
+                lastChannel = .rgb
+                glide(to: c, tau: Glide.manual)
+                continue
+            }
             send(frame(for: action))
             // A fade to off leaves brightness at 0; bring it back when switched on again.
             if action == .on, let b = brightnessToRestore {
@@ -114,9 +120,69 @@ final class LampController: NSObject {
     }
 
     /// Live colour from screen/music sync. Dropped (not queued) when it can't be shown.
-    func stream(_ c: RGB) {
+    /// `tau` is the glide time constant in seconds (≈ time to cover 63% of the change).
+    func stream(_ c: RGB, tau: Double) {
         guard isConnected, isOn, !isFading, !lookIsHeld else { return }
-        send(LampProtocol.color(r: c.r, g: c.g, b: c.b, variant: variant))
+        glide(to: c, tau: tau)
+    }
+
+    // MARK: Colour glide
+
+    /// Time constants (seconds) for exponential glides; ~3τ to settle.
+    enum Glide {
+        static let manual = 0.12
+        static let fade = 0.4
+    }
+
+    private var glideValue: SIMD3<Double>?
+    private var glideTarget = SIMD3<Double>(255, 255, 255)
+    private var glideTau = Glide.manual
+    private var glideTask: Task<Void, Never>?
+    private var lastSentColor: RGB?
+
+    /// Colours that the lamp shows through its RGB channels (everything on RGB-only lamps).
+    private func rgbOnlyColor(for action: LampAction) -> RGB? {
+        switch action {
+        case .color(let r, let g, let b): return RGB(r: r, g: g, b: b)
+        case .colorTemperature(let w) where variant == .dmx: return Self.rgb(forWarmth: w)
+        default: return nil
+        }
+    }
+
+    /// Moves the shown colour toward `c` with exponential easing. Retargeting mid-glide
+    /// continues from wherever the colour currently is, so rapid updates never jump.
+    private func glide(to c: RGB, tau: Double) {
+        glideTarget = SIMD3(Double(c.r), Double(c.g), Double(c.b))
+        glideTau = max(0.001, tau)
+        guard glideValue != nil, tau > 0 else {
+            glideValue = glideTarget
+            sendColor(c)
+            return
+        }
+        guard glideTask == nil else { return }
+        glideTask = Task { [weak self] in
+            var last = ContinuousClock.now
+            while let self, !Task.isCancelled, var v = self.glideValue {
+                try? await Task.sleep(for: .milliseconds(25))
+                let now = ContinuousClock.now
+                let dt = Double((now - last).components.attoseconds) / 1e18 + Double((now - last).components.seconds)
+                last = now
+                let k = 1 - exp(-dt / self.glideTau)
+                v += (self.glideTarget - v) * k
+                let done = (self.glideTarget - v).max() < 0.5 && (v - self.glideTarget).max() < 0.5
+                if done { v = self.glideTarget }
+                self.glideValue = v
+                self.sendColor(RGB(r: Int(v.x.rounded()), g: Int(v.y.rounded()), b: Int(v.z.rounded())), log: done)
+                if done { break }
+            }
+            self?.glideTask = nil
+        }
+    }
+
+    private func sendColor(_ c: RGB, log: Bool = true) {
+        guard c != lastSentColor else { return }
+        lastSentColor = c
+        send(LampProtocol.color(r: c.r, g: c.g, b: c.b, variant: variant), log: log)
     }
 
     // MARK: Fades
@@ -156,22 +222,28 @@ final class LampController: NSObject {
         }
         if !isOn && !target.contains(.on) { fromRGB = toRGB }
         let restore = brightnessLevel > 0 ? brightnessLevel : 80
-        let steps = max(1, min(Int(seconds), 240))
-        let interval = seconds / Double(steps)
-        fadeEndsAt = Date().addingTimeInterval(seconds)
+        let start = Date()
+        fadeEndsAt = start.addingTimeInterval(seconds)
         append("Fade over \(Int(seconds))s → \(target.map(\.label).joined(separator: ", "))")
+        // Tick often enough for smooth colour, but not wastefully on hour-long fades.
+        let tick = min(0.5, max(0.05, seconds / 2000))
         fadeTask = Task { [weak self] in
-            for i in 1...steps {
-                try? await Task.sleep(for: .seconds(interval))
+            var lastB = fromB
+            while true {
+                try? await Task.sleep(for: .seconds(tick))
                 guard let self, !Task.isCancelled else { return }
-                let t = Double(i) / Double(steps)
-                let b = Int((Double(fromB) + Double(toB - fromB) * t).rounded())
-                var step: [LampAction] = [.brightness(b)]
+                let t = min(1, Date().timeIntervalSince(start) / max(seconds, 0.001))
                 if fromRGB != toRGB {
                     let c = fromRGB.mixed(with: toRGB, t)
-                    step.insert(.color(r: c.r, g: c.g, b: c.b), at: 0)
+                    self.look = .color(r: c.r, g: c.g, b: c.b)
+                    self.glide(to: c, tau: tick)
                 }
-                self.apply(step)
+                let b = Int((Double(fromB) + Double(toB - fromB) * t).rounded())
+                if b != lastB {
+                    lastB = b
+                    self.send(self.frame(for: .brightness(b)), log: false)
+                }
+                if t >= 1 { break }
             }
             guard let self, !Task.isCancelled else { return }
             if endOff {
@@ -243,8 +315,9 @@ final class LampController: NSObject {
         central.connect(p)
     }
 
-    private func send(_ bytes: [UInt8]) {
+    private func send(_ bytes: [UInt8], log: Bool = true) {
         guard let peripheral, let characteristic else { return }
+        if log { append("→ " + bytes.map { String(format: "%02X", $0) }.joined(separator: " ")) }
         // Collapse rapid slider updates: keep only the newest frame per command type.
         let key = commandKey(bytes)
         queue.removeAll { commandKey($0) == key }
@@ -252,8 +325,14 @@ final class LampController: NSObject {
         if !writing { drain(peripheral, characteristic) }
     }
 
+    /// Identifies the command type (not its values) so a newer frame replaces a queued one.
     private func commandKey(_ b: [UInt8]) -> [UInt8] {
-        b[1] == 0xFF || b[0] == 0x7B ? Array(b.prefix(4)) : Array(b.prefix(2))
+        switch (b[0], b[1]) {
+        case (0x7B, 0xFF): return Array(b.prefix(3))            // 7B FF <cmd> …
+        case (0x7B, _): return Array(b.prefix(3))               // 7B 04 04 (power)
+        case (0x7E, 0xFF): return b[2] == 0x05 ? Array(b.prefix(4)) : Array(b.prefix(3)) // 05 has a sub-command
+        default: return Array(b.prefix(2))
+        }
     }
 
     /// The Android app paces writes 30–100 ms apart; the lamp drops frames sent faster.
@@ -263,9 +342,8 @@ final class LampController: NSObject {
         writing = true
         let type: CBCharacteristicWriteType = c.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
         p.writeValue(Data(next), for: c, type: type)
-        append("→ " + next.map { String(format: "%02X", $0) }.joined(separator: " "))
         Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(60))
+            try? await Task.sleep(for: .milliseconds(45))
             guard let self else { return }
             self.writing = false
             if let p = self.peripheral, let c = self.characteristic { self.drain(p, c) }
@@ -360,6 +438,8 @@ extension LampController: CBCentralManagerDelegate {
             characteristic = nil
             queue.removeAll()
             writing = false
+            glideValue = nil
+            lastSentColor = nil
             status = .idle
             append("Disconnected\(error.map { ": \($0.localizedDescription)" } ?? "")")
             if error != nil { scheduleReconnect() }
