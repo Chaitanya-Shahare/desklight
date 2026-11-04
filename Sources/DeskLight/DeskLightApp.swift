@@ -9,6 +9,7 @@ struct DeskLightApp: App {
     @State private var wallpaper: WallpaperSync
     @State private var live: LiveSync
     @State private var automations: Automations
+    @State private var pomodoro: PomodoroController
     private let commands: Commands
 
     init() {
@@ -26,14 +27,22 @@ struct DeskLightApp: App {
         _wallpaper = State(initialValue: wallpaper)
         _live = State(initialValue: live)
         _automations = State(initialValue: Automations(lamp: lamp))
-        commands = Commands(lamp: lamp, wallpaper: wallpaper, live: live)
+        let pomodoro = PomodoroController(lamp: lamp, live: live)
+        _pomodoro = State(initialValue: pomodoro)
+        commands = Commands(lamp: lamp, wallpaper: wallpaper, live: live, pomodoro: pomodoro)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            ControlPanel(lamp: lamp, wallpaper: wallpaper, live: live, automations: automations)
+            ControlPanel(lamp: lamp, wallpaper: wallpaper, live: live, automations: automations, pomodoro: pomodoro)
         } label: {
-            Image(systemName: menuIcon)
+            if pomodoro.inSession {
+                // Countdown in the menu bar while a Pomodoro session runs.
+                Image(systemName: pomodoro.timer.phase == .focus ? "timer" : "cup.and.saucer.fill")
+                Text(pomodoro.remainingLabel).monospacedDigit()
+            } else {
+                Image(systemName: menuIcon)
+            }
         }
         .menuBarExtraStyle(.window)
 
@@ -55,12 +64,13 @@ struct DeskLightApp: App {
 }
 
 struct ControlPanel: View {
-    enum Tab: String, CaseIterable { case color = "Color", white = "White", live = "Live" }
+    enum Tab: String, CaseIterable { case color = "Color", white = "White", live = "Live", focus = "Focus" }
 
     let lamp: LampController
     let wallpaper: WallpaperSync
     @Bindable var live: LiveSync
     @Bindable var automations: Automations
+    @Bindable var pomodoro: PomodoroController
     @Environment(\.openWindow) private var openWindow
     @AppStorage("tab") private var tab = Tab.color
     @AppStorage("brightness") private var brightness = 80.0
@@ -91,6 +101,7 @@ struct ControlPanel: View {
                 case .color: colorTab
                 case .white: whiteTab
                 case .live: liveTab
+                case .focus: PomodoroPanel(pomodoro: pomodoro)
                 }
                 fadeRow
             } else {
@@ -259,7 +270,7 @@ struct ControlPanel: View {
                 .onChange(of: launchAtLogin) { _, on in
                     try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
                 }
-            Text("⌃⌥⌘L toggle · ⌃⌥⌘↑/↓ brightness · ⌃⌥⌘W wallpaper")
+            Text("⌃⌥⌘L toggle · ⌃⌥⌘↑/↓ brightness · ⌃⌥⌘W wallpaper · ⌃⌥⌘P focus timer")
                 .font(.caption).foregroundStyle(.secondary)
             if lamp.isConnected {
                 Button("Disconnect") { lamp.disconnect() }

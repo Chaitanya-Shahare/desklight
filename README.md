@@ -34,6 +34,17 @@ open build/DeskLight.app        # or: scripts/build-app.sh --install
 
 Picking a color manually turns Live off.
 
+## Focus timer (Pomodoro)
+
+**Focus** tab: 25 min focus / 5 min break / 15 min long break every 4 (all adjustable).
+
+- The lamp is the progress bar: focus glides **green → yellow → orange → red** as time runs out; breaks are a calm, dimmer blue (purple for long breaks).
+- Three white pulses + a sound mark the end of each phase.
+- The menu bar shows the countdown; the popup shows a progress bar in the same colors.
+- **Stop** restores the lamp's previous color. ⌃⌥⌘P starts/pauses.
+
+The lamp is a single-color controller (no per-LED addressing), so progress is shown by color, not a lit bar.
+
 ## Fades
 
 - **Fade out**: dims to off over 5–60 minutes.
@@ -53,6 +64,7 @@ Picking a color manually turns Live off.
 | ⌃⌥⌘L | Toggle on/off |
 | ⌃⌥⌘↑ / ↓ | Brightness ±10% |
 | ⌃⌥⌘W | Wallpaper color |
+| ⌃⌥⌘P | Start/pause focus timer |
 
 ## Links (Shortcuts, Raycast, Terminal)
 
@@ -63,6 +75,7 @@ open desklight://white/70        # 70% warm
 open desklight://brightness/40   # or +10 / -10
 open desklight://live/music      # screen, wallpaper, off
 open desklight://fadeout/30      # minutes; also sunrise/15
+open desklight://pomodoro/start  # pause, toggle, skip, stop
 ```
 
 ## Schedules
