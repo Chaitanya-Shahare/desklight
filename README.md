@@ -5,7 +5,16 @@ Power, brightness, a color wheel / RGB picker, warm/cool white, live color from 
 
 Tested with `LEDDMX-03-0F2B` (RGB). Also speaks the `LEDBLE-*` command set from the same app.
 
-## Run
+## Install
+
+```sh
+brew install --cask chaitanya-shahare/tap/desklight
+```
+
+Universal build (Apple Silicon + Intel), macOS 14+. It's self-signed, not notarized; the cask clears the
+download quarantine flag so it opens without the "unidentified developer" block.
+
+## Build from source
 
 ```sh
 scripts/setup-signing.sh        # once: stable local signature, so Bluetooth permission survives rebuilds
@@ -83,6 +92,14 @@ open desklight://pomodoro/start  # pause, toggle, skip, stop
 Menu bar → **Schedules…**. Each schedule has a time, days, and actions (power, white/color, brightness).
 They run only while the Mac is awake. A schedule whose time passes during sleep is skipped. After wake, the app reconnects to the lamp.
 Stored in `~/Library/Application Support/DeskLight/schedules.json`.
+
+## Releasing
+
+```sh
+scripts/release.sh 0.2.0                      # dist/DeskLight-0.2.0.zip + SHA-256
+gh release create v0.2.0 dist/DeskLight-0.2.0.zip
+# then bump version + sha256 in Chaitanya-Shahare/homebrew-tap Casks/desklight.rb
+```
 
 ## Tests
 
