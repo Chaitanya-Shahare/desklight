@@ -8,7 +8,7 @@ Tested with `LEDDMX-03-0F2B` (RGB). Also speaks the `LEDBLE-*` command set from 
 ## Install
 
 ```sh
-brew install --cask chaitanya-shahare/tap/desklight
+brew install --cask chaitanya-shahare/formulae/desklight
 ```
 
 Universal build (Apple Silicon + Intel), macOS 14+. It's self-signed, not notarized; the cask clears the
@@ -98,7 +98,7 @@ Stored in `~/Library/Application Support/DeskLight/schedules.json`.
 ```sh
 scripts/release.sh 0.2.0                      # dist/DeskLight-0.2.0.zip + SHA-256
 gh release create v0.2.0 dist/DeskLight-0.2.0.zip
-# then bump version + sha256 in Chaitanya-Shahare/homebrew-tap Casks/desklight.rb
+# then bump version + sha256 in Chaitanya-Shahare/homebrew-formulae Casks/desklight.rb
 ```
 
 ## Tests
