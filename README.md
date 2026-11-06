@@ -5,7 +5,16 @@ Power, brightness, a color wheel / RGB picker, warm/cool white, live color from 
 
 Tested with `LEDDMX-03-0F2B` (RGB). Also speaks the `LEDBLE-*` command set from the same app.
 
-## Run
+## Install
+
+```sh
+brew install --cask chaitanya-shahare/formulae/desklight
+```
+
+Universal build (Apple Silicon + Intel), macOS 14+. It's self-signed, not notarized; the cask clears the
+download quarantine flag so it opens without the "unidentified developer" block.
+
+## Build from source
 
 ```sh
 scripts/setup-signing.sh        # once: stable local signature, so Bluetooth permission survives rebuilds
@@ -34,6 +43,17 @@ open build/DeskLight.app        # or: scripts/build-app.sh --install
 
 Picking a color manually turns Live off.
 
+## Focus timer (Pomodoro)
+
+**Focus** tab: 25 min focus / 5 min break / 15 min long break every 4 (all adjustable).
+
+- The lamp is the progress bar: focus glides **green → yellow → orange → red** as time runs out; breaks are a calm, dimmer blue (purple for long breaks).
+- Three white pulses + a sound mark the end of each phase.
+- The menu bar shows the countdown; the popup shows a progress bar in the same colors.
+- **Stop** restores the lamp's previous color. ⌃⌥⌘P starts/pauses.
+
+The lamp is a single-color controller (no per-LED addressing), so progress is shown by color, not a lit bar.
+
 ## Fades
 
 - **Fade out**: dims to off over 5–60 minutes.
@@ -53,6 +73,7 @@ Picking a color manually turns Live off.
 | ⌃⌥⌘L | Toggle on/off |
 | ⌃⌥⌘↑ / ↓ | Brightness ±10% |
 | ⌃⌥⌘W | Wallpaper color |
+| ⌃⌥⌘P | Start/pause focus timer |
 
 ## Links (Shortcuts, Raycast, Terminal)
 
@@ -63,6 +84,7 @@ open desklight://white/70        # 70% warm
 open desklight://brightness/40   # or +10 / -10
 open desklight://live/music      # screen, wallpaper, off
 open desklight://fadeout/30      # minutes; also sunrise/15
+open desklight://pomodoro/start  # pause, toggle, skip, stop
 ```
 
 ## Schedules
@@ -70,6 +92,14 @@ open desklight://fadeout/30      # minutes; also sunrise/15
 Menu bar → **Schedules…**. Each schedule has a time, days, and actions (power, white/color, brightness).
 They run only while the Mac is awake. A schedule whose time passes during sleep is skipped. After wake, the app reconnects to the lamp.
 Stored in `~/Library/Application Support/DeskLight/schedules.json`.
+
+## Releasing
+
+```sh
+scripts/release.sh 0.2.0                      # dist/DeskLight-0.2.0.zip + SHA-256
+gh release create v0.2.0 dist/DeskLight-0.2.0.zip
+# then bump version + sha256 in Chaitanya-Shahare/homebrew-formulae Casks/desklight.rb
+```
 
 ## Tests
 

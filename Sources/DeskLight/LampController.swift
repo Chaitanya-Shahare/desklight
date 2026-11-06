@@ -36,7 +36,11 @@ final class LampController: NSObject {
     /// What the app last told the lamp to do; used to restore after On-Air / unlock.
     private(set) var isOn = true
     private(set) var brightnessLevel = Int(UserDefaults.standard.object(forKey: "brightness") as? Double ?? 80)
-    private(set) var look: LampAction?
+    /// Persisted so "restore previous colour" (On-Air, Pomodoro stop) works after a relaunch.
+    private(set) var look: LampAction? = UserDefaults.standard.data(forKey: "look")
+        .flatMap { try? JSONDecoder().decode(LampAction.self, from: $0) } {
+        didSet { UserDefaults.standard.set(look.flatMap { try? JSONEncoder().encode($0) }, forKey: "look") }
+    }
     /// While set (e.g. On-Air), ambient features like wallpaper sync must not change the colour.
     var lookIsHeld = false
 

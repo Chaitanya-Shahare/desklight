@@ -8,19 +8,22 @@ import LampKit
 ///     desklight://brightness/40      desklight://brightness/+10
 ///     desklight://color/FF8800       desklight://white/70   (70% warm)
 ///     desklight://live/screen|music|wallpaper|off
+///     desklight://pomodoro/start|pause|toggle|skip|stop
 ///     desklight://fadeout/30         desklight://sunrise/15  (minutes)
 @MainActor
 final class Commands: NSObject {
     private let lamp: LampController
     private let wallpaper: WallpaperSync
     private let live: LiveSync
+    private let pomodoro: PomodoroController
     private var hotKeys: [EventHotKeyRef?] = []
     private static var shared: Commands?
 
-    init(lamp: LampController, wallpaper: WallpaperSync, live: LiveSync) {
+    init(lamp: LampController, wallpaper: WallpaperSync, live: LiveSync, pomodoro: PomodoroController) {
         self.lamp = lamp
         self.wallpaper = wallpaper
         self.live = live
+        self.pomodoro = pomodoro
         super.init()
         Self.shared = self
         installURLHandler()
@@ -62,6 +65,14 @@ final class Commands: NSObject {
             guard let c = RGB(hex: arg) else { return }
             live.stopForManualChange()
             lamp.setColor(r: c.r, g: c.g, b: c.b)
+        case "pomodoro", "focus":
+            switch arg {
+            case "start": pomodoro.start()
+            case "pause": pomodoro.pause()
+            case "skip": pomodoro.skip()
+            case "stop": pomodoro.stop()
+            default: pomodoro.toggle()
+            }
         case "live":
             if let m = LiveSync.Mode.allCases.first(where: { $0.rawValue.lowercased() == arg }) { live.mode = m }
         case "fadeout":
@@ -97,6 +108,7 @@ final class Commands: NSObject {
         (kVK_UpArrow, "brightness/+10"),
         (kVK_DownArrow, "brightness/-10"),
         (kVK_ANSI_W, "wallpaper"),
+        (kVK_ANSI_P, "pomodoro/toggle"),
     ]
 
     private func registerHotKeys() {

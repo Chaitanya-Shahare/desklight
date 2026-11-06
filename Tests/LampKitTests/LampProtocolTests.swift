@@ -126,3 +126,34 @@ struct NewFeatureTests {
         #expect(entries.first?.fadeMinutes == 0)
     }
 }
+
+struct PomodoroTests {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    @Test func countsDownAndPauses() {
+        var p = Pomodoro()
+        p.start(at: t0)
+        #expect(p.remaining(at: t0.addingTimeInterval(60)) == 24 * 60)
+        #expect(abs(p.progress(at: t0.addingTimeInterval(750)) - 0.5) < 0.001)
+        p.pause(at: t0.addingTimeInterval(600))
+        // Paused time doesn't count.
+        #expect(p.remaining(at: t0.addingTimeInterval(5000)) == 15 * 60)
+        p.start(at: t0.addingTimeInterval(5000))
+        #expect(p.remaining(at: t0.addingTimeInterval(5060)) == 14 * 60)
+    }
+
+    @Test func cyclesToLongBreak() {
+        var p = Pomodoro()
+        var phases: [PomodoroPhase] = []
+        for _ in 0..<8 { phases.append(p.advance(at: t0)) }
+        #expect(phases == [.shortBreak, .focus, .shortBreak, .focus, .shortBreak, .focus, .longBreak, .focus])
+        // Breaks auto-start, focus waits for the user by default.
+        #expect(!p.isRunning)
+    }
+
+    @Test func focusColorRunsGreenToRed() {
+        let start = Pomodoro.color(.focus, progress: 0), end = Pomodoro.color(.focus, progress: 1)
+        #expect(start.g == 255 && start.r == 0)
+        #expect(end.r == 255 && end.g == 0)
+    }
+}
