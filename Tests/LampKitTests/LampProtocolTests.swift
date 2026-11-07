@@ -211,20 +211,32 @@ struct ScreenSyncTests {
         #expect(bottom.color.r == 255 && bottom.color.g < 80)
     }
 
+    /// Dark-mode UI: mostly dark grey with a small blue accent. Screen sync should show the
+    /// accent as a saturated blue, not a washed-out grey.
+    @Test func ambientIgnoresGreyUI() throws {
+        let img = try image(60, 60) { x, y in x < 12 && y < 12 ? (20, 90, 240) : (40, 40, 44) }
+        let p = ScreenProfile.movie
+        let c = try #require(DominantColor.ambient(img, satWeight: p.satWeight, saturation: p.saturation, gain: p.gain))
+        let (h, s, _) = c.hsv
+        #expect(s > 0.8 && abs(h - 0.6) < 0.05)
+    }
+
     @Test func regionsStayOnScreen() {
         let unit = CGRect(x: 0, y: 0, width: 1, height: 1)
         for r in ScreenRegion.allCases {
             #expect(unit.contains(r.captureRect))
             for s in r.sampleRects ?? [] { #expect(unit.contains(s)) }
         }
-        // Smaller regions capture less of the screen.
-        #expect(ScreenRegion.bottomCenter.captureRect.width < 1)
+        // Each style uses the area it was tuned with.
+        #expect(ScreenProfile.solid.region == .bottomCenter)
+        #expect(ScreenProfile.movie.region == .bottomCenter)
+        #expect(ScreenProfile.game.region == .edges)
     }
 
     @Test func fasterProfilesReactFaster() {
-        let (calm, movie, game) = (ScreenProfile.calm, ScreenProfile.movie, ScreenProfile.game)
-        #expect(calm.framesPerSecond < movie.framesPerSecond && movie.framesPerSecond < game.framesPerSecond)
-        #expect(calm.smoothing < movie.smoothing && movie.smoothing < game.smoothing)
-        #expect(calm.glide > movie.glide && movie.glide > game.glide)
+        let (solid, movie, game) = (ScreenProfile.solid, ScreenProfile.movie, ScreenProfile.game)
+        #expect(solid.framesPerSecond < movie.framesPerSecond && movie.framesPerSecond < game.framesPerSecond)
+        #expect(solid.smoothing < movie.smoothing && movie.smoothing < game.smoothing)
+        #expect(solid.glide > movie.glide && movie.glide > game.glide)
     }
 }

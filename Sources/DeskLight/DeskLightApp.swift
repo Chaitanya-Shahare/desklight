@@ -82,6 +82,8 @@ struct ControlPanel: View {
     @AppStorage("brightness") private var brightness = 80.0
     @AppStorage("warmth") private var warmth = 50.0
     @AppStorage("customColor") private var customHex = "FF653E"
+    /// Colours the user saved with "+", comma-separated hex.
+    @AppStorage("savedColors") private var savedHex = ""
     @State private var hexField = ""
 
     private static let swatches: [RGB] = [
@@ -91,6 +93,10 @@ struct ControlPanel: View {
     ]
 
     private var custom: RGB { RGB(hex: customHex) ?? RGB(r: 255, g: 101, b: 62) }
+
+    private static let maxSaved = 9
+    private var saved: [RGB] { savedHex.split(separator: ",").compactMap { RGB(hex: String($0)) } }
+    private func setSaved(_ colors: [RGB]) { savedHex = colors.map(\.hex).joined(separator: ",") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -161,6 +167,27 @@ struct ControlPanel: View {
                     Button { pick(c) } label: { dot(c, size: 22) }.buttonStyle(.plain)
                 }
             }
+            Text("My colors").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                ForEach(saved, id: \.self) { c in
+                    Button { pick(c) } label: { dot(c, size: 22) }
+                        .buttonStyle(.plain)
+                        .help("#\(c.hex) · right-click to remove")
+                        .contextMenu { Button("Remove") { setSaved(saved.filter { $0 != c }) } }
+                }
+                if saved.count < Self.maxSaved && !saved.contains(custom) {
+                    Button { setSaved(saved + [custom]) } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(custom.swiftUI)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Save #\(custom.hex) to My colors")
+                }
+                if saved.isEmpty {
+                    Text("Save the current color").font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -218,12 +245,11 @@ struct ControlPanel: View {
                 Spacer(minLength: 0)
                 if let c = live.screenColor { dot(c, size: 16) }
             }
-            Picker("Display", selection: $live.screenDisplay) {
-                Text("Main display").tag(CGDirectDisplayID?.none)
-                ForEach(DisplayChoice.all) { Text($0.name).tag(Optional($0.id)) }
-            }
-            Picker("Area", selection: $live.screenRegion) {
-                ForEach(ScreenRegion.allCases) { Text($0.rawValue).tag($0) }
+            if DisplayChoice.all.count > 1 {
+                Picker("Display", selection: $live.screenDisplay) {
+                    Text("Main display").tag(CGDirectDisplayID?.none)
+                    ForEach(DisplayChoice.all) { Text($0.name).tag(Optional($0.id)) }
+                }
             }
             Picker("Style", selection: $live.screenProfile) {
                 ForEach(ScreenProfile.allCases) { Text($0.rawValue).tag($0) }
@@ -235,9 +261,9 @@ struct ControlPanel: View {
 
     private var profileHint: String {
         switch live.screenProfile {
-        case .calm: "Slow, steady color. Lowest battery use."
-        case .movie: "Follows scene changes without flicker."
-        case .game: "Reacts instantly to flashes. Highest battery use."
+        case .solid: "Slow, steady color from the lower middle of the screen. Lowest battery use."
+        case .movie: "Follows the action in the lower middle of the picture, without flicker."
+        case .game: "Follows the screen edges like a TV backlight; reacts instantly. Highest battery use."
         }
     }
 

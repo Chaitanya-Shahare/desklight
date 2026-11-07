@@ -31,9 +31,6 @@ final class LiveSync {
     var screenProfile: ScreenProfile {
         didSet { save(screenProfile.rawValue, "screenProfile", changed: screenProfile != oldValue) }
     }
-    var screenRegion: ScreenRegion {
-        didSet { save(screenRegion.rawValue, "screenRegion", changed: screenRegion != oldValue) }
-    }
     /// nil follows the main display.
     var screenDisplay: CGDirectDisplayID? {
         didSet { save(screenDisplay.map { Int($0) }, "screenDisplay", changed: screenDisplay != oldValue) }
@@ -57,7 +54,6 @@ final class LiveSync {
         let d = UserDefaults.standard
         mode = Mode(rawValue: d.string(forKey: "liveMode") ?? "") ?? .off
         screenProfile = ScreenProfile(rawValue: d.string(forKey: "screenProfile") ?? "") ?? .movie
-        screenRegion = ScreenRegion(rawValue: d.string(forKey: "screenRegion") ?? "") ?? .full
         screenDisplay = (d.object(forKey: "screenDisplay") as? Int).map { CGDirectDisplayID($0) }
         sensitivity = d.object(forKey: "musicSensitivity") as? Double ?? 1
         tap.sensitivity = sensitivity
@@ -69,9 +65,9 @@ final class LiveSync {
                 }
             }
         }
-        screen.onFrame = { [weak self] analysis in
+        screen.onFrame = { [weak self] color in
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.screenFrame(analysis) }
+                MainActor.assumeIsolated { self?.screenFrame(color) }
             }
         }
         screen.onStop = { [weak self] message in
@@ -104,13 +100,13 @@ final class LiveSync {
         screenColor = nil
         let generation = generation
         let wantScreen = mode == .screen
-        let (display, region, fps) = (screenDisplay, screenRegion, screenProfile.framesPerSecond)
+        let (display, profile) = (screenDisplay, screenProfile)
         Task {
             await screen.stop()
             guard wantScreen, generation == self.generation else { return }
             do {
-                try await screen.start(display: display, region: region, fps: fps)
-                lamp.note("Screen sync started (\(region.rawValue), \(fps) fps)")
+                try await screen.start(display: display, profile: profile)
+                lamp.note("Screen sync started (\(profile.rawValue))")
                 // The mode may have changed while the capture was starting.
                 if generation != self.generation { await screen.stop() }
             } catch {
@@ -129,11 +125,9 @@ final class LiveSync {
         }
     }
 
-    private func screenFrame(_ a: DominantColor.Analysis) {
+    private func screenFrame(_ target: RGB) {
         guard mode == .screen else { return }
         let p = screenProfile
-        // Dark scenes dim the lamp; bright scenes run it at full colour.
-        let target = a.color.scaled(0.12 + a.luminance * 1.6)
         let next = smoothed.map { $0.mixed(with: target, p.smoothing) } ?? target
         smoothed = next
         if let last = screenColor, next.distance(to: last) < p.minChange { return }

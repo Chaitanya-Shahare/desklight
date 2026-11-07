@@ -29,6 +29,7 @@ open build/DeskLight.app        # or: scripts/build-app.sh --install
 ## Color
 
 **Color** tab: drag on the wheel, use the R/G/B sliders, type a hex code, or click a swatch.
+**My colors**: click **+** to save the current color; click a saved color to apply it, right-click to remove it (up to 9).
 **White** tab: cool ↔ warm slider (mixed from RGB on RGB-only lamps).
 
 ## Live
@@ -48,16 +49,16 @@ Picking a color manually turns Live off.
 Screen mode records the screen to read its colors, so it uses more battery and macOS shows a recording
 indicator. It runs only while selected; the Live tab shows a warning while it's on.
 
-- **Display**: the main display or any other connected one (e.g. an external monitor you watch films on).
-- **Area**: Full screen, Edges (border bands only, like a TV backlight), Bottom, Bottom center (where
-  the action is in most films), or Center. Only that area is captured.
-- **Style**:
+Pick a **Style**. Each one reads the part of the screen it was tuned for, and only that part is captured:
 
-| Style | Captures | Feel |
-|---|---|---|
-| Calm | 4×/s | Slow, steady ambient color; lowest battery use |
-| Movie | 10×/s | Follows scene changes without flicker (default) |
-| Game | 20×/s | Reacts instantly to flashes; highest battery use |
+| Style | Reads | Captures | Feel |
+|---|---|---|---|
+| Solid | Lower middle | 4×/s | Slow, steady ambient color; lowest battery use |
+| Movie | Lower middle | 10×/s | Follows the action without flicker (default) |
+| Game | Screen edges | 20×/s | Like a TV backlight; reacts instantly to flashes |
+
+Colors are weighted toward vivid pixels, so dark-mode apps and letterbox bars don't wash the lamp out
+to grey. With more than one display connected, a **Display** picker chooses which one to follow.
 
 ## Focus timer (Pomodoro)
 
