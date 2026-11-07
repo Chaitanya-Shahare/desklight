@@ -151,9 +151,27 @@ struct PomodoroTests {
         #expect(!p.isRunning)
     }
 
-    @Test func focusColorRunsGreenToRed() {
-        let start = Pomodoro.color(.focus, progress: 0), end = Pomodoro.color(.focus, progress: 1)
-        #expect(start.g == 255 && start.r == 0)
-        #expect(end.r == 255 && end.g == 0)
+    @Test func focusColorRunsGreenThroughYellowToRed() {
+        let p = Pomodoro()
+        #expect(p.color(.focus, progress: 0) == RGB(r: 0, g: 255, b: 0))
+        #expect(p.color(.focus, progress: 1) == RGB(r: 255, g: 0, b: 0))
+        #expect(p.color(.focus, progress: 0.5) == RGB(r: 255, g: 255, b: 0)) // yellow, not brown
+    }
+
+    @Test func customColorsAndOldConfigs() throws {
+        var c = PomodoroConfig()
+        c.focusStart = RGB(r: 0, g: 0, b: 255)
+        c.focusEnd = RGB(r: 255, g: 0, b: 255)
+        #expect(Pomodoro(config: c).color(.focus, progress: 1) == RGB(r: 255, g: 0, b: 255))
+        // Configs saved before colours existed still decode, with default colours.
+        let old = try JSONDecoder().decode(PomodoroConfig.self, from: Data(#"{"focusMinutes":50}"#.utf8))
+        #expect(old.focusMinutes == 50 && old.focusStart == PomodoroConfig().focusStart)
+    }
+
+    @Test func timeScaleForSelfTest() {
+        var p = Pomodoro()
+        p.secondsPerMinute = 1
+        p.start(at: t0)
+        #expect(p.remaining(at: t0) == 25)
     }
 }

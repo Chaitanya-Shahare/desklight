@@ -1,7 +1,7 @@
 # DeskLight
 
 Menu bar app for Bluetooth desk lamps that use the **LED LAMP** app (iOS id1449109039 / Android `com.ledlamp`).
-Power, brightness, a color wheel / RGB picker, warm/cool white, live color from your wallpaper, screen, or music, slow fades, and schedules.
+Power, brightness, a color wheel / RGB picker, warm/cool white, live color from your wallpaper or music, a Pomodoro timer on the lamp, slow fades, and schedules.
 
 Tested with `LEDDMX-03-0F2B` (RGB). Also speaks the `LEDBLE-*` command set from the same app.
 
@@ -11,7 +11,7 @@ Tested with `LEDDMX-03-0F2B` (RGB). Also speaks the `LEDBLE-*` command set from 
 brew install --cask chaitanya-shahare/formulae/desklight
 ```
 
-Universal build (Apple Silicon + Intel), macOS 14+. It's self-signed, not notarized; the cask clears the
+Universal build (Apple Silicon + Intel), macOS 14.2+. It's self-signed, not notarized; the cask clears the
 download quarantine flag so it opens without the "unidentified developer" block.
 
 ## Build from source
@@ -38,8 +38,7 @@ open build/DeskLight.app        # or: scripts/build-app.sh --install
 | Mode | What it does | Permission |
 |---|---|---|
 | Wallpaper | Brightest vivid color of your desktop picture; updates when it or the Space changes | none |
-| Screen | Follows what's on the main display ~12×/s (videos, games); dark scenes dim the lamp | Screen & System Audio Recording |
-| Music | Brightness follows bass, hue steps on each beat; sensitivity slider | Screen & System Audio Recording |
+| Music | Brightness follows bass, hue steps on each beat; sensitivity slider | System Audio Recording Only (Core Audio tap, no screen capture) |
 
 Picking a color manually turns Live off.
 
@@ -48,6 +47,8 @@ Picking a color manually turns Live off.
 **Focus** tab: 25 min focus / 5 min break / 15 min long break every 4 (all adjustable).
 
 - The lamp is the progress bar: focus glides **green → yellow → orange → red** as time runs out; breaks are a calm, dimmer blue (purple for long breaks).
+- Every phase's start and end color is customizable in **Settings… → Focus timer colors**.
+- Picking a color by hand mid-session keeps your color until the next phase (or hit **Resume on lamp**).
 - Three white pulses + a sound mark the end of each phase.
 - The menu bar shows the countdown; the popup shows a progress bar in the same colors.
 - **Stop** restores the lamp's previous color. ⌃⌥⌘P starts/pauses.
@@ -100,6 +101,28 @@ scripts/release.sh 0.2.0                      # dist/DeskLight-0.2.0.zip + SHA-2
 gh release create v0.2.0 dist/DeskLight-0.2.0.zip
 # then bump version + sha256 in Chaitanya-Shahare/homebrew-formulae Casks/desklight.rb
 ```
+
+## Resource use
+
+Measured on an M-series MacBook (lamp connected or not):
+
+| State | CPU | Memory (footprint) |
+|---|---|---|
+| Idle | ~0% (≈0.1 wake-ups/s) | ~16 MB |
+| Focus timer running | ~0.05% | ~17 MB |
+| Music mode | ~0.35% | ~17 MB |
+
+No polling loops: On-Air uses Core Audio / CoreMediaIO change listeners, schedules wake once a minute,
+and the focus timer only writes to the lamp when the color actually changes.
+
+## Headless self-test
+
+```sh
+open -W --stdout /dev/stdout build/DeskLight.app --args --selftest
+```
+
+Connects to the saved lamp (or checks app output if it's offline), runs a sped-up focus timer with
+custom colors, captures system audio for music mode, and reports CPU / wake-ups / memory. Exits non-zero on failure.
 
 ## Tests
 

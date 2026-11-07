@@ -14,7 +14,8 @@ final class WallpaperSync {
     var following: Bool {
         didSet {
             UserDefaults.standard.set(following, forKey: "followWallpaper")
-            if following { apply(force: true) }
+            updateTimer()
+            if following && !oldValue { apply(force: true) }
         }
     }
 
@@ -31,11 +32,22 @@ final class WallpaperSync {
                 MainActor.assumeIsolated { self?.poll() }
             }
         }
-        // There is no public "wallpaper changed" notification; a cheap URL/date check covers it.
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+        updateTimer()
+        if following { apply(force: true) }
+    }
+
+    /// There is no public "wallpaper changed" notification, so while following we check
+    /// the file once a minute. Space switches and wake are caught instantly by notifications.
+    private func updateTimer() {
+        timer?.invalidate()
+        timer = nil
+        guard following else { return }
+        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
-        if following { apply(force: true) }
+        t.tolerance = 10
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     /// One-shot: send the wallpaper colour now.

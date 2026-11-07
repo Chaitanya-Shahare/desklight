@@ -143,6 +143,9 @@ final class LampController: NSObject {
     private var glideTau = Glide.manual
     private var glideTask: Task<Void, Never>?
     private var lastSentColor: RGB?
+    /// Diagnostics for the headless self-test.
+    private(set) var framesSent = 0
+    var shownColor: RGB? { lastSentColor }
 
     /// Colours that the lamp shows through its RGB channels (everything on RGB-only lamps).
     private func rgbOnlyColor(for action: LampAction) -> RGB? {
@@ -167,7 +170,8 @@ final class LampController: NSObject {
         glideTask = Task { [weak self] in
             var last = ContinuousClock.now
             while let self, !Task.isCancelled, var v = self.glideValue {
-                try? await Task.sleep(for: .milliseconds(25))
+                // Matches the ~45 ms BLE write pacing: faster ticks would only be dropped.
+                try? await Task.sleep(for: .milliseconds(45))
                 let now = ContinuousClock.now
                 let dt = Double((now - last).components.attoseconds) / 1e18 + Double((now - last).components.seconds)
                 last = now
@@ -344,6 +348,7 @@ final class LampController: NSObject {
         guard !queue.isEmpty else { return }
         let next = queue.removeFirst()
         writing = true
+        framesSent += 1
         let type: CBCharacteristicWriteType = c.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
         p.writeValue(Data(next), for: c, type: type)
         Task { [weak self] in
@@ -356,6 +361,9 @@ final class LampController: NSObject {
 
     private static let logFile = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/DeskLight.log")
+
+    /// Adds a line to the in-app log and ~/Library/Logs/DeskLight.log.
+    func note(_ line: String) { append(line) }
 
     private func append(_ line: String) {
         log.append(line)
@@ -372,6 +380,7 @@ final class LampController: NSObject {
 
     private func didBecomeReady(_ p: CBPeripheral, _ c: CBCharacteristic) {
         characteristic = c
+        reconnectDelay = 5
         variant = .init(deviceName: p.name ?? "")
         status = .connected(p.name ?? "lamp")
         append("Connected to \(p.name ?? "lamp") (\(variant))")
@@ -386,10 +395,15 @@ final class LampController: NSObject {
         }
     }
 
+    private var reconnectDelay = 5.0
+
+    /// Retries with backoff (5 s → 5 min) so a switched-off lamp doesn't keep the radio busy.
     private func scheduleReconnect() {
         reconnectTask?.cancel()
+        let delay = reconnectDelay
+        reconnectDelay = min(300, reconnectDelay * 2)
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             self?.reconnect()
         }

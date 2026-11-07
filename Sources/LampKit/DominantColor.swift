@@ -37,6 +37,20 @@ public struct RGB: Equatable, Hashable, Codable, Sendable {
     }
 
     public func distance(to o: RGB) -> Int { abs(r - o.r) + abs(g - o.g) + abs(b - o.b) }
+
+    /// Blends through HSV along the shorter way round the hue wheel, so green → red passes
+    /// through yellow/orange instead of the muddy brown a straight RGB mix gives.
+    public func blended(to o: RGB, _ t: Double) -> RGB {
+        let t = min(1, max(0, t))
+        var (h1, s1, v1) = hsv
+        var (h2, s2, v2) = o.hsv
+        // Greys have no meaningful hue: borrow the other colour's.
+        if s1 < 0.05 { h1 = h2 }
+        if s2 < 0.05 { h2 = h1 }
+        var dh = h2 - h1
+        if dh > 0.5 { dh -= 1 } else if dh < -0.5 { dh += 1 }
+        return RGB(hue: h1 + dh * t, saturation: s1 + (s2 - s1) * t, value: v1 + (v2 - v1) * t)
+    }
 }
 
 /// Picks an LED-friendly accent colour from an image.

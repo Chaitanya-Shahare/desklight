@@ -13,6 +13,7 @@ APP=dist/DeskLight.app
 rm -rf dist && mkdir -p "$APP/Contents/MacOS"
 cp "$BIN" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
+mkdir -p "$APP/Contents/Resources" && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$(git rev-list --count HEAD)" "$APP/Contents/Info.plist"
 

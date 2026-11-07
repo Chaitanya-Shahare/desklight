@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PomodoroPanel: View {
     @Bindable var pomodoro: PomodoroController
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let timer = pomodoro.timer
@@ -32,29 +33,30 @@ struct PomodoroPanel: View {
                 Spacer()
                 Button("Stop") { pomodoro.stop() }.disabled(!pomodoro.inSession)
             }
-            Toggle("Show progress on lamp (green → red, blue on breaks)", isOn: $pomodoro.showOnLamp)
-                .font(.caption)
-            DisclosureGroup("Durations") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Stepper("Focus \(pomodoro.config.focusMinutes) min",
-                            value: $pomodoro.config.focusMinutes, in: 1...120, step: 5)
-                    Stepper("Short break \(pomodoro.config.shortBreakMinutes) min",
-                            value: $pomodoro.config.shortBreakMinutes, in: 1...30)
-                    Stepper("Long break \(pomodoro.config.longBreakMinutes) min",
-                            value: $pomodoro.config.longBreakMinutes, in: 5...60, step: 5)
-                    Stepper("Long break every \(pomodoro.config.longBreakEvery)",
-                            value: $pomodoro.config.longBreakEvery, in: 2...8)
-                    Toggle("Start breaks automatically", isOn: $pomodoro.config.autoStartBreaks)
-                    Toggle("Start focus automatically", isOn: $pomodoro.config.autoStartFocus)
+            if pomodoro.lampPausedByUser {
+                HStack {
+                    Text("Lamp shows your color until the next phase.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Resume on lamp") { pomodoro.resumeLamp() }.controlSize(.small)
                 }
-                .padding(.top, 4)
+            }
+            HStack {
+                Toggle("Show progress on lamp", isOn: $pomodoro.showOnLamp).font(.caption)
+                Spacer()
+                Button("Colors & durations…") {
+                    openWindow(id: "settings")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                .controlSize(.small)
             }
         }
+        .onAppear { pomodoro.panelVisible = true }
+        .onDisappear { pomodoro.panelVisible = false }
     }
 }
 
 /// Filled with the same colour gradient the lamp walks through.
-private struct ProgressBar: View {
+struct ProgressBar: View {
     let progress: Double
     let color: (Double) -> RGB
 
@@ -62,16 +64,22 @@ private struct ProgressBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary)
+                // Static gradient, no implicit animation: nothing renders between ticks.
                 Capsule()
-                    .fill(LinearGradient(colors: stride(from: 0.0, through: max(progress, 0.01), by: max(progress, 0.01) / 6)
-                        .map { swiftUI(color($0)) }, startPoint: .leading, endPoint: .trailing))
+                    .fill(LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 0.2)
+                        .map { color($0 * max(progress, 0.01)).swiftUI }, startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(geo.size.height, geo.size.width * progress))
-                    .animation(.linear(duration: 1), value: progress)
             }
         }
     }
+}
 
-    private func swiftUI(_ c: RGB) -> Color {
-        Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+extension RGB {
+    var swiftUI: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255) }
+
+    init(_ color: Color) {
+        let n = NSColor(color).usingColorSpace(.sRGB) ?? .white
+        self.init(r: Int((n.redComponent * 255).rounded()), g: Int((n.greenComponent * 255).rounded()),
+                  b: Int((n.blueComponent * 255).rounded()))
     }
 }
