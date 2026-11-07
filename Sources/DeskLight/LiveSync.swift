@@ -47,6 +47,9 @@ final class LiveSync {
     private var smoothed: RGB?
     /// Bumped on every restart so a slow capture start can't outlive a newer mode.
     private var generation = 0
+    /// The last capture stop/start. Each restart waits for it, so two starts never overlap
+    /// (an older start finishing last would orphan the newer stream, leaving capture running).
+    private var screenTask: Task<Void, Never>?
 
     init(lamp: LampController, wallpaper: WallpaperSync) {
         self.lamp = lamp
@@ -101,7 +104,9 @@ final class LiveSync {
         let generation = generation
         let wantScreen = mode == .screen
         let (display, profile) = (screenDisplay, screenProfile)
-        Task {
+        let previous = screenTask
+        screenTask = Task {
+            await previous?.value
             await screen.stop()
             guard wantScreen, generation == self.generation else { return }
             do {
