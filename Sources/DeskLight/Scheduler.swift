@@ -24,9 +24,7 @@ final class Scheduler {
     init(lamp: LampController) {
         self.lamp = lamp
         load()
-        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
+        scheduleNextTick()
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -39,6 +37,22 @@ final class Scheduler {
 
     func tick(now: Date = Date()) {
         for entry in clock.due(entries, at: now) { run(entry) }
+    }
+
+    /// One wake-up per minute, just after :00, with tolerance so macOS can coalesce it.
+    private func scheduleNextTick() {
+        let now = Date()
+        let next = (Calendar.current.dateInterval(of: .minute, for: now)?.end ?? now.addingTimeInterval(60))
+            .addingTimeInterval(0.5)
+        let t = Timer(fire: next, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.tick()
+                self?.scheduleNextTick()
+            }
+        }
+        t.tolerance = 2
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func run(_ entry: ScheduleEntry) {

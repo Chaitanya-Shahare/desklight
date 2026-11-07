@@ -15,7 +15,8 @@ final class Automations {
     private(set) var onAir = false
 
     private let lamp: LampController
-    private var timer: Timer?
+    private var watchedCameras = Set<CMIOObjectID>()
+    private var watchedMic: AudioObjectID?
     private var wasOnBeforeLock = true
     private var saved: (on: Bool, look: LampAction?)?
 
@@ -37,9 +38,73 @@ final class Automations {
         ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.away() }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.check() }
+        // Event-driven: Core Audio / CoreMediaIO call back only when a device starts or stops,
+        // so On-Air costs nothing while idle (no polling timer).
+        watchDevices()
+        check()
+    }
+
+    // MARK: Device listeners
+
+    private static let main = DispatchQueue.main
+
+    private func onChange() {
+        MainActor.assumeIsolated { self.watchDevices(); self.check() }
+    }
+
+    private func watchDevices() {
+        let system = CMIOObjectID(kCMIOObjectSystemObject)
+        if watchedCameras.isEmpty {
+            var list = Self.cmioAddress(kCMIOHardwarePropertyDevices)
+            CMIOObjectAddPropertyListenerBlock(system, &list, Self.main) { [weak self] _, _ in self?.onChange() }
         }
+        for id in Self.cameraIDs() where !watchedCameras.contains(id) {
+            var running = Self.cmioAddress(kCMIODevicePropertyDeviceIsRunningSomewhere)
+            CMIOObjectAddPropertyListenerBlock(id, &running, Self.main) { [weak self] _, _ in self?.onChange() }
+            watchedCameras.insert(id)
+        }
+
+        let audioSystem = AudioObjectID(kAudioObjectSystemObject)
+        if watchedMic == nil {
+            var def = Self.audioAddress(kAudioHardwarePropertyDefaultInputDevice)
+            AudioObjectAddPropertyListenerBlock(audioSystem, &def, Self.main) { [weak self] _, _ in self?.onChange() }
+        }
+        if let mic = Self.defaultInputID(), mic != watchedMic {
+            var running = Self.audioAddress(kAudioDevicePropertyDeviceIsRunningSomewhere)
+            AudioObjectAddPropertyListenerBlock(mic, &running, Self.main) { [weak self] _, _ in self?.onChange() }
+            watchedMic = mic
+        }
+    }
+
+    private static func cmioAddress(_ selector: Int) -> CMIOObjectPropertyAddress {
+        CMIOObjectPropertyAddress(mSelector: CMIOObjectPropertySelector(selector),
+                                  mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+                                  mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
+    }
+
+    private static func audioAddress(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                   mElement: kAudioObjectPropertyElementMain)
+    }
+
+    private static func cameraIDs() -> [CMIOObjectID] {
+        var addr = cmioAddress(kCMIOHardwarePropertyDevices)
+        var size: UInt32 = 0
+        let system = CMIOObjectID(kCMIOObjectSystemObject)
+        guard CMIOObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
+        var used: UInt32 = 0
+        guard CMIOObjectGetPropertyData(system, &addr, 0, nil, size, &used, &ids) == noErr else { return [] }
+        return ids
+    }
+
+    private static func defaultInputID() -> AudioObjectID? {
+        var addr = audioAddress(kAudioHardwarePropertyDefaultInputDevice)
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &device) == noErr,
+              device != 0 else { return nil }
+        return device
     }
 
     // MARK: Lock / sleep

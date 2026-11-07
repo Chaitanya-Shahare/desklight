@@ -1,5 +1,4 @@
 import LampKit
-import ServiceManagement
 import SwiftUI
 
 @main
@@ -18,6 +17,9 @@ struct DeskLightApp: App {
             let diag = Diagnostics(nameFilter: args.indices.contains(i + 1) ? args[i + 1] : nil)
             withExtendedLifetime(diag) { RunLoop.main.run(until: .now + 60) }
             exit(2)
+        }
+        if args.contains("--selftest") {
+            SelfTest.run() // headless: exercises the lamp, timer and audio tap, then exits
         }
         let lamp = LampController()
         let wallpaper = WallpaperSync(lamp: lamp)
@@ -38,8 +40,9 @@ struct DeskLightApp: App {
         } label: {
             if pomodoro.inSession {
                 // Countdown in the menu bar while a Pomodoro session runs.
+                // Minutes only (one redraw a minute); seconds appear in the final minute.
                 Image(systemName: pomodoro.timer.phase == .focus ? "timer" : "cup.and.saucer.fill")
-                Text(pomodoro.remainingLabel).monospacedDigit()
+                Text(pomodoro.menuLabel).monospacedDigit()
             } else {
                 Image(systemName: menuIcon)
             }
@@ -50,16 +53,18 @@ struct DeskLightApp: App {
             ScheduleList(scheduler: scheduler)
         }
         .defaultSize(width: 520, height: 420)
+
+        Window("DeskLight Settings", id: "settings") {
+            SettingsView(lamp: lamp, pomodoro: pomodoro, automations: automations)
+        }
+        .windowResizability(.contentSize)
     }
 
     private var menuIcon: String {
         if automations.onAir { return "video.fill" }
         if !lamp.isConnected { return "lightbulb" }
-        switch live.mode {
-        case .screen: return "tv.fill"
-        case .music: return "music.note"
-        default: return lamp.isFading ? "sunset.fill" : "lightbulb.fill"
-        }
+        if live.mode == .music { return "music.note" }
+        return lamp.isFading ? "sunset.fill" : "lightbulb.fill"
     }
 }
 
@@ -77,7 +82,6 @@ struct ControlPanel: View {
     @AppStorage("warmth") private var warmth = 50.0
     @AppStorage("customColor") private var customHex = "FF653E"
     @State private var hexField = ""
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private static let swatches: [RGB] = [
         RGB(r: 255, g: 0, b: 0), RGB(r: 255, g: 110, b: 0), RGB(r: 255, g: 220, b: 0), RGB(r: 0, g: 255, b: 0),
@@ -108,21 +112,9 @@ struct ControlPanel: View {
                 scanList
             }
             Divider()
-            DisclosureGroup("Settings") { settings }
-            DisclosureGroup("Log") {
-                ScrollView {
-                    Text(lamp.log.suffix(30).joined(separator: "\n"))
-                        .font(.system(.caption2, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(height: 100)
-            }
             HStack {
-                Button("Schedules…") {
-                    openWindow(id: "schedules")
-                    NSApp.activate(ignoringOtherApps: true)
-                }
+                Button("Schedules…") { open("schedules") }
+                Button("Settings…") { open("settings") }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
             }
@@ -177,6 +169,7 @@ struct ControlPanel: View {
                 Slider(value: $warmth, in: 0...100)
                     .onChange(of: warmth) { _, w in
                         live.stopForManualChange()
+                        pomodoro.userTookOverLamp()
                         lamp.setWarmth(Int(w))
                     }
             }
@@ -194,7 +187,7 @@ struct ControlPanel: View {
                 .pickerStyle(.segmented).labelsHidden()
             switch live.mode {
             case .off:
-                Text("Wallpaper, what's on screen, or music can drive the lamp color.")
+                Text("Your wallpaper or the music you're playing can drive the lamp color.")
                     .font(.caption).foregroundStyle(.secondary)
             case .wallpaper:
                 HStack {
@@ -204,16 +197,9 @@ struct ControlPanel: View {
                     Button("Apply now") { wallpaper.apply(force: true) }
                 }
                 if let e = wallpaper.error { Text(e).font(.caption).foregroundStyle(.secondary) }
-            case .screen, .music:
-                HStack {
-                    Text(live.mode == .screen ? "Matches what's on your main display." : "Pulses with system audio.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    if let c = live.current { dot(c, size: 16) }
-                }
-                if live.mode == .music {
-                    LabeledContent("Sensitivity") { Slider(value: $live.sensitivity, in: 0.3...3) }
-                }
+            case .music:
+                Text("Pulses with whatever your Mac is playing.").font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Sensitivity") { Slider(value: $live.sensitivity, in: 0.3...3) }
             }
             if let e = live.error { Text(e).font(.caption).foregroundStyle(.orange) }
         }
@@ -258,27 +244,6 @@ struct ControlPanel: View {
         }
     }
 
-    private var settings: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Off when Mac locks or sleeps", isOn: $automations.followLock)
-            HStack {
-                Text("On-Air red light:")
-                Toggle("Camera", isOn: $automations.onAirCamera)
-                Toggle("Mic", isOn: $automations.onAirMic)
-            }
-            Toggle("Launch at login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, on in
-                    try? on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
-                }
-            Text("⌃⌥⌘L toggle · ⌃⌥⌘↑/↓ brightness · ⌃⌥⌘W wallpaper · ⌃⌥⌘P focus timer")
-                .font(.caption).foregroundStyle(.secondary)
-            if lamp.isConnected {
-                Button("Disconnect") { lamp.disconnect() }
-            }
-        }
-        .padding(.top, 4)
-    }
-
     // MARK: Helpers
 
     private func channel(_ label: String, _ key: WritableKeyPath<RGB, Int>, _ tint: Color) -> some View {
@@ -292,9 +257,14 @@ struct ControlPanel: View {
         }
     }
 
+    private func open(_ window: String) {
+        openWindow(id: window)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func dot(_ c: RGB, size: CGFloat) -> some View {
         Circle()
-            .fill(Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255))
+            .fill(c.swiftUI)
             .overlay(Circle().stroke(.secondary.opacity(0.5)))
             .frame(width: size, height: size)
     }
@@ -303,6 +273,7 @@ struct ControlPanel: View {
         customHex = c.hex
         hexField = c.hex
         live.stopForManualChange()
+        pomodoro.userTookOverLamp()
         lamp.setColor(r: c.r, g: c.g, b: c.b)
     }
 

@@ -7,7 +7,48 @@ public struct PomodoroConfig: Codable, Equatable, Sendable {
     public var longBreakEvery = 4
     public var autoStartBreaks = true
     public var autoStartFocus = false
+    /// Each phase glides from its start colour to its end colour as time passes.
+    public var focusStart = RGB(r: 0, g: 255, b: 0)
+    public var focusEnd = RGB(r: 255, g: 0, b: 0)
+    public var shortBreakStart = RGB(r: 35, g: 112, b: 140)
+    public var shortBreakEnd = RGB(r: 35, g: 140, b: 105)
+    public var longBreakStart = RGB(r: 98, g: 42, b: 140)
+    public var longBreakEnd = RGB(r: 42, g: 70, b: 140)
+
     public init() {}
+
+    public func colors(for phase: PomodoroPhase) -> (start: RGB, end: RGB) {
+        switch phase {
+        case .focus: (focusStart, focusEnd)
+        case .shortBreak: (shortBreakStart, shortBreakEnd)
+        case .longBreak: (longBreakStart, longBreakEnd)
+        }
+    }
+
+    public mutating func resetColors() {
+        let d = PomodoroConfig()
+        (focusStart, focusEnd) = (d.focusStart, d.focusEnd)
+        (shortBreakStart, shortBreakEnd) = (d.shortBreakStart, d.shortBreakEnd)
+        (longBreakStart, longBreakEnd) = (d.longBreakStart, d.longBreakEnd)
+    }
+
+    // Older saved configs lack some keys; fall back to defaults field by field.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = PomodoroConfig()
+        focusMinutes = try c.decodeIfPresent(Int.self, forKey: .focusMinutes) ?? d.focusMinutes
+        shortBreakMinutes = try c.decodeIfPresent(Int.self, forKey: .shortBreakMinutes) ?? d.shortBreakMinutes
+        longBreakMinutes = try c.decodeIfPresent(Int.self, forKey: .longBreakMinutes) ?? d.longBreakMinutes
+        longBreakEvery = try c.decodeIfPresent(Int.self, forKey: .longBreakEvery) ?? d.longBreakEvery
+        autoStartBreaks = try c.decodeIfPresent(Bool.self, forKey: .autoStartBreaks) ?? d.autoStartBreaks
+        autoStartFocus = try c.decodeIfPresent(Bool.self, forKey: .autoStartFocus) ?? d.autoStartFocus
+        focusStart = try c.decodeIfPresent(RGB.self, forKey: .focusStart) ?? d.focusStart
+        focusEnd = try c.decodeIfPresent(RGB.self, forKey: .focusEnd) ?? d.focusEnd
+        shortBreakStart = try c.decodeIfPresent(RGB.self, forKey: .shortBreakStart) ?? d.shortBreakStart
+        shortBreakEnd = try c.decodeIfPresent(RGB.self, forKey: .shortBreakEnd) ?? d.shortBreakEnd
+        longBreakStart = try c.decodeIfPresent(RGB.self, forKey: .longBreakStart) ?? d.longBreakStart
+        longBreakEnd = try c.decodeIfPresent(RGB.self, forKey: .longBreakEnd) ?? d.longBreakEnd
+    }
 }
 
 public enum PomodoroPhase: String, Codable, Sendable {
@@ -31,6 +72,9 @@ public struct Pomodoro: Sendable {
     public private(set) var endsAt: Date?
     public private(set) var pausedRemaining: TimeInterval?
 
+    /// Real seconds per configured minute. Tests and the headless self-test shrink this.
+    public var secondsPerMinute: Double = 60
+
     public init(config: PomodoroConfig = .init()) { self.config = config }
 
     public var isRunning: Bool { endsAt != nil }
@@ -38,9 +82,9 @@ public struct Pomodoro: Sendable {
 
     public func duration(of p: PomodoroPhase) -> TimeInterval {
         switch p {
-        case .focus: Double(config.focusMinutes) * 60
-        case .shortBreak: Double(config.shortBreakMinutes) * 60
-        case .longBreak: Double(config.longBreakMinutes) * 60
+        case .focus: Double(config.focusMinutes) * secondsPerMinute
+        case .shortBreak: Double(config.shortBreakMinutes) * secondsPerMinute
+        case .longBreak: Double(config.longBreakMinutes) * secondsPerMinute
         }
     }
 
@@ -71,7 +115,9 @@ public struct Pomodoro: Sendable {
     }
 
     public mutating func reset() {
+        let scale = secondsPerMinute
         self = Pomodoro(config: config)
+        secondsPerMinute = scale
     }
 
     /// Ends the current phase (time up or skipped) and moves to the next one.
@@ -89,14 +135,9 @@ public struct Pomodoro: Sendable {
         return phase
     }
 
-    /// Lamp colour for a phase at a given progress.
-    /// Focus runs green → yellow → orange → red as time runs out; breaks are calm, dimmer blues.
-    public static func color(_ phase: PomodoroPhase, progress p: Double) -> RGB {
-        let p = min(1, max(0, p))
-        switch phase {
-        case .focus: return RGB(hue: (1.0 / 3) * (1 - p), saturation: 1, value: 1)
-        case .shortBreak: return RGB(hue: 0.55 - 0.1 * p, saturation: 0.75, value: 0.55)
-        case .longBreak: return RGB(hue: 0.75 - 0.15 * p, saturation: 0.7, value: 0.55)
-        }
+    /// Lamp colour for a phase at a given progress (0–1), from the configured gradient.
+    public func color(_ phase: PomodoroPhase, progress p: Double) -> RGB {
+        let (start, end) = config.colors(for: phase)
+        return start.blended(to: end, p)
     }
 }

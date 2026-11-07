@@ -48,6 +48,7 @@ final class Commands: NSObject {
     }
 
     func run(_ command: String) {
+        lamp.note("Command: \(command)")
         let parts = command.lowercased().split(separator: "/").map(String.init)
         guard let verb = parts.first else { return }
         let arg = parts.count > 1 ? parts[1] : ""
