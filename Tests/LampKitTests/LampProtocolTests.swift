@@ -175,3 +175,68 @@ struct PomodoroTests {
         #expect(p.remaining(at: t0) == 25)
     }
 }
+
+struct ScreenSyncTests {
+    private func image(_ w: Int, _ h: Int, _ pixel: (Int, Int) -> (UInt8, UInt8, UInt8)) throws -> CGImage {
+        var px = [UInt8](repeating: 255, count: w * h * 4)
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                (px[i], px[i + 1], px[i + 2]) = pixel(x, y)
+            }
+        }
+        let ctx = try #require(CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        return try #require(ctx.makeImage())
+    }
+
+    /// Thin red border around a big blue picture: the whole frame reads blue, the edges read red.
+    @Test func edgesRegionIgnoresTheMiddle() throws {
+        let img = try image(64, 64) { x, y in
+            min(x, y, 63 - x, 63 - y) < 5 ? (230, 20, 20) : (20, 40, 230)
+        }
+        let full = try #require(DominantColor.analyze(img, sample: 64))
+        #expect(full.color.b == 255 && full.color.r < 80)
+        let edges = try #require(DominantColor.analyze(img, sample: 64, include: ScreenRegion.edges.sampleRects))
+        #expect(edges.color.r == 255 && edges.color.b < 80)
+    }
+
+    /// `include` uses a top-left origin: top half green, bottom half red.
+    @Test func includeUsesTopLeftOrigin() throws {
+        let img = try image(40, 40) { _, y in y < 20 ? (20, 220, 20) : (220, 20, 20) }
+        let top = try #require(DominantColor.analyze(img, include: [CGRect(x: 0, y: 0, width: 1, height: 0.5)]))
+        #expect(top.color.g == 255 && top.color.r < 80)
+        let bottom = try #require(DominantColor.analyze(img, include: [CGRect(x: 0, y: 0.5, width: 1, height: 0.5)]))
+        #expect(bottom.color.r == 255 && bottom.color.g < 80)
+    }
+
+    /// Dark-mode UI: mostly dark grey with a small blue accent. Screen sync should show the
+    /// accent as a saturated blue, not a washed-out grey.
+    @Test func ambientIgnoresGreyUI() throws {
+        let img = try image(60, 60) { x, y in x < 12 && y < 12 ? (20, 90, 240) : (40, 40, 44) }
+        let p = ScreenProfile.movie
+        let c = try #require(DominantColor.ambient(img, satWeight: p.satWeight, saturation: p.saturation, gain: p.gain))
+        let (h, s, _) = c.hsv
+        #expect(s > 0.8 && abs(h - 0.6) < 0.05)
+    }
+
+    @Test func regionsStayOnScreen() {
+        let unit = CGRect(x: 0, y: 0, width: 1, height: 1)
+        for r in ScreenRegion.allCases {
+            #expect(unit.contains(r.captureRect))
+            for s in r.sampleRects ?? [] { #expect(unit.contains(s)) }
+        }
+        // Each style uses the area it was tuned with.
+        #expect(ScreenProfile.solid.region == .bottomCenter)
+        #expect(ScreenProfile.movie.region == .bottomCenter)
+        #expect(ScreenProfile.game.region == .edges)
+    }
+
+    @Test func fasterProfilesReactFaster() {
+        let (solid, movie, game) = (ScreenProfile.solid, ScreenProfile.movie, ScreenProfile.game)
+        #expect(solid.framesPerSecond < movie.framesPerSecond && movie.framesPerSecond < game.framesPerSecond)
+        #expect(solid.smoothing < movie.smoothing && movie.smoothing < game.smoothing)
+        #expect(solid.glide > movie.glide && movie.glide > game.glide)
+    }
+}

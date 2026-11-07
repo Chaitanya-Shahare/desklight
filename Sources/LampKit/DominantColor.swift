@@ -72,7 +72,10 @@ public enum DominantColor {
 
     /// - Parameter minVividShare: fraction of the frame the winning hue must cover (by weight)
     ///   before it beats the plain average. Raise it for screens, where a small icon shouldn't win.
-    public static func analyze(_ image: CGImage, sample: Int = 64, minVividShare: Double = 0.002) -> Analysis? {
+    /// - Parameter include: if set, only pixels inside these rectangles count. Unit coordinates,
+    ///   origin at the top-left (e.g. the four edge strips for screen sync's "Edges" region).
+    public static func analyze(_ image: CGImage, sample: Int = 64, minVividShare: Double = 0.002,
+                               include: [CGRect]? = nil) -> Analysis? {
         let w = sample, h = max(1, sample * image.height / max(1, image.width))
         var pixels = [UInt8](repeating: 0, count: w * h * 4)
         guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
@@ -86,8 +89,16 @@ public enum DominantColor {
         var sums = [(Double, Double, Double)](repeating: (0, 0, 0), count: bins)
         var avg = (0.0, 0.0, 0.0)
         var luma = 0.0
+        var counted = 0
 
         for i in stride(from: 0, to: pixels.count, by: 4) {
+            if let include {
+                // Bitmap rows run top to bottom, matching the top-left origin of `include`.
+                let p = i / 4
+                let pt = CGPoint(x: (Double(p % w) + 0.5) / Double(w), y: (Double(p / w) + 0.5) / Double(h))
+                guard include.contains(where: { $0.contains(pt) }) else { continue }
+            }
+            counted += 1
             let r = Double(pixels[i]) / 255, g = Double(pixels[i + 1]) / 255, b = Double(pixels[i + 2]) / 255
             avg.0 += r; avg.1 += g; avg.2 += b
             luma += 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -99,7 +110,8 @@ public enum DominantColor {
             sums[bin].0 += r * wgt; sums[bin].1 += g * wgt; sums[bin].2 += b * wgt
         }
 
-        let n = Double(w * h)
+        guard counted > 0 else { return nil }
+        let n = Double(counted)
         luma /= n
         let pooled = (0..<bins).map { i in
             weight[i] + 0.5 * (weight[(i + bins - 1) % bins] + weight[(i + 1) % bins])
@@ -133,5 +145,44 @@ public enum DominantColor {
     private static func vivid(_ r: Double, _ g: Double, _ b: Double, boost: Bool) -> RGB {
         let (h, s, _) = hsv(r, g, b)
         return RGB(hue: h, saturation: boost ? min(1, s * 1.2 + 0.05) : s, value: 1)
+    }
+}
+
+extension DominantColor {
+    /// Bias-light colour for Screen sync, ported from the Python `ambilight.py` that drove the
+    /// same lamp. Each pixel counts by saturation^`satWeight` × brightness, so grey and white UI
+    /// barely counts and colourful content wins. The average is then pushed in HSV:
+    /// saturation × `saturation` (greys stay grey) and value × `gain` (dark scenes stay dark).
+    ///
+    /// - Parameter include: as in `analyze`; unit rectangles, top-left origin.
+    public static func ambient(_ image: CGImage, sample: Int = 48, include: [CGRect]? = nil,
+                               satWeight: Double, saturation: Double, gain: Double) -> RGB? {
+        let w = sample, h = max(1, sample * image.height / max(1, image.width))
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .medium
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        var sum = (0.0, 0.0, 0.0), total = 0.0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            if let include {
+                let p = i / 4
+                let pt = CGPoint(x: (Double(p % w) + 0.5) / Double(w), y: (Double(p / w) + 0.5) / Double(h))
+                guard include.contains(where: { $0.contains(pt) }) else { continue }
+            }
+            let r = Double(pixels[i]), g = Double(pixels[i + 1]), b = Double(pixels[i + 2])
+            let mx = max(r, g, b), mn = min(r, g, b)
+            let s = mx > 0 ? (mx - mn) / mx : 0
+            let wgt = pow(s, satWeight) * (mx / 255) + 1e-3
+            sum.0 += r * wgt; sum.1 += g * wgt; sum.2 += b * wgt
+            total += wgt
+        }
+        guard total > 0 else { return nil }
+        var (hue, s, v) = hsv(sum.0 / total / 255, sum.1 / total / 255, sum.2 / total / 255)
+        if s > 0.04 { s = min(1, s * saturation) }
+        v = min(1, v * gain)
+        return RGB(hue: hue, saturation: s, value: v)
     }
 }
