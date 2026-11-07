@@ -8,6 +8,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$(swift build -c release --show-bin-path)/DeskLight" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
+mkdir -p "$APP/Contents/Resources" && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 KC="$HOME/Library/Keychains/desklight-signing.keychain-db"
 if [ -f "$KC" ]; then
   # Stable identity → macOS keeps Bluetooth permission across rebuilds.
