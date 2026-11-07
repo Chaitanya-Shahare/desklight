@@ -39,8 +39,25 @@ open build/DeskLight.app        # or: scripts/build-app.sh --install
 |---|---|---|
 | Wallpaper | Brightest vivid color of your desktop picture; updates when it or the Space changes | none |
 | Music | Brightness follows bass, hue steps on each beat; sensitivity slider | System Audio Recording Only (Core Audio tap, no screen capture) |
+| Screen ⚠️ | Follows what's on a display, like a TV backlight; dark scenes dim the lamp | Screen & System Audio Recording |
 
 Picking a color manually turns Live off.
+
+### Screen (opt-in)
+
+Screen mode records the screen to read its colors, so it uses more battery and macOS shows a recording
+indicator. It runs only while selected; the Live tab shows a warning while it's on.
+
+- **Display**: the main display or any other connected one (e.g. an external monitor you watch films on).
+- **Area**: Full screen, Edges (border bands only, like a TV backlight), Bottom, Bottom center (where
+  the action is in most films), or Center. Only that area is captured.
+- **Style**:
+
+| Style | Captures | Feel |
+|---|---|---|
+| Calm | 4×/s | Slow, steady ambient color; lowest battery use |
+| Movie | 10×/s | Follows scene changes without flicker (default) |
+| Game | 20×/s | Reacts instantly to flashes; highest battery use |
 
 ## Focus timer (Pomodoro)
 

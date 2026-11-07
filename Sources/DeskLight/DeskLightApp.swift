@@ -64,6 +64,7 @@ struct DeskLightApp: App {
         if automations.onAir { return "video.fill" }
         if !lamp.isConnected { return "lightbulb" }
         if live.mode == .music { return "music.note" }
+        if live.mode == .screen { return "tv.fill" }
         return lamp.isFading ? "sunset.fill" : "lightbulb.fill"
     }
 }
@@ -187,7 +188,7 @@ struct ControlPanel: View {
                 .pickerStyle(.segmented).labelsHidden()
             switch live.mode {
             case .off:
-                Text("Your wallpaper or the music you're playing can drive the lamp color.")
+                Text("Your wallpaper, the music you're playing, or what's on screen can drive the lamp color.")
                     .font(.caption).foregroundStyle(.secondary)
             case .wallpaper:
                 HStack {
@@ -200,8 +201,43 @@ struct ControlPanel: View {
             case .music:
                 Text("Pulses with whatever your Mac is playing.").font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Sensitivity") { Slider(value: $live.sensitivity, in: 0.3...3) }
+            case .screen:
+                screenOptions
             }
             if let e = live.error { Text(e).font(.caption).foregroundStyle(.orange) }
+        }
+    }
+
+    private var screenOptions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                Text("Records your screen to read its colors. Uses more battery, and macOS shows a recording indicator. Turn it off when you're done.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if let c = live.screenColor { dot(c, size: 16) }
+            }
+            Picker("Display", selection: $live.screenDisplay) {
+                Text("Main display").tag(CGDirectDisplayID?.none)
+                ForEach(DisplayChoice.all) { Text($0.name).tag(Optional($0.id)) }
+            }
+            Picker("Area", selection: $live.screenRegion) {
+                ForEach(ScreenRegion.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Picker("Style", selection: $live.screenProfile) {
+                ForEach(ScreenProfile.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Text(profileHint).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var profileHint: String {
+        switch live.screenProfile {
+        case .calm: "Slow, steady color. Lowest battery use."
+        case .movie: "Follows scene changes without flicker."
+        case .game: "Reacts instantly to flashes. Highest battery use."
         }
     }
 
